@@ -27,8 +27,8 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.43.0
-	golang.org/x/term v0.42.0
+	golang.org/x/sys v0.44.0
+	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	rsc.io/script v0.0.2
 )
@@ -123,7 +123,7 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dolthub/aws-sdk-go-ini-parser v0.0.0-20250305001723-2821c37f6c12 // indirect
-	github.com/dolthub/dolt/go v0.40.5-0.20260422221605-73fcb4a868c2 // indirect
+	github.com/dolthub/dolt/go v0.40.5-0.20260422221605-73fcb4a868c2
 	github.com/dolthub/eventsapi_schema v0.0.0-20260310172945-37a9265ade69 // indirect
 	github.com/dolthub/flatbuffers/v23 v23.3.3-dh.2 // indirect
 	github.com/dolthub/fslock v0.0.3 // indirect
