@@ -1,8 +1,10 @@
 package issueops
 
 import (
+	"context"
 	"testing"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -303,4 +305,63 @@ func TestTableRouting(t *testing.T) {
 			}
 		})
 	}
+}
+
+// initViperForTest initializes config so config.Set/GetString work.
+// Returns a cleanup function that resets config state.
+func initViperForTest(t *testing.T) {
+	t.Helper()
+	config.ResetForTesting()
+	if err := config.Initialize(); err != nil {
+		t.Fatalf("config.Initialize: %v", err)
+	}
+	t.Cleanup(config.ResetForTesting)
+}
+
+// TestReadConfigPrefix_ConfigShortcut verifies that ReadConfigPrefix returns
+// the value from config.GetString("issue-prefix") without touching the DB.
+// Passing a nil *sql.Tx proves the DB path is never reached.
+func TestReadConfigPrefix_ConfigShortcut(t *testing.T) {
+	tests := []struct {
+		name string
+		set  string
+		want string
+	}{
+		{name: "plain prefix", set: "hq", want: "hq"},
+		{name: "trailing dash stripped", set: "hq-", want: "hq"},
+		{name: "no trailing dash", set: "myproject", want: "myproject"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			initViperForTest(t)
+			config.Set("issue-prefix", tc.set)
+
+			got, err := ReadConfigPrefix(context.Background(), nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("ReadConfigPrefix() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReadConfigPrefix_FallsThrough verifies that when config.GetString
+// returns empty, ReadConfigPrefix falls through to the DB query path.
+// We pass a nil *sql.Tx, so the DB path panics -- recovering from that
+// panic proves the shortcut was NOT taken.
+func TestReadConfigPrefix_FallsThrough(t *testing.T) {
+	initViperForTest(t)
+	// Do NOT set "issue-prefix" in config.
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from nil tx (proving DB path was reached), but no panic occurred")
+		}
+		// Panic occurred -- the function fell through to the DB query as expected.
+	}()
+
+	_, _ = ReadConfigPrefix(context.Background(), nil)
 }

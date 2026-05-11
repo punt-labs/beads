@@ -2518,3 +2518,64 @@ func TestSearchIssues_StableOrdering(t *testing.T) {
 		}
 	}
 }
+
+// TestGetReadyWork_LabelsAnyFilter verifies that LabelsAny uses OR semantics:
+// an issue matching ANY of the listed labels is returned.
+func TestGetReadyWork_LabelsAnyFilter(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	// Create three issues: two with different labels, one with no label.
+	issues := []*types.Issue{
+		{ID: "la-alpha", Title: "Alpha", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{ID: "la-beta", Title: "Beta", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{ID: "la-none", Title: "NoLabel", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+	}
+	for _, iss := range issues {
+		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
+			t.Fatalf("failed to create issue %s: %v", iss.ID, err)
+		}
+	}
+	if err := store.AddLabel(ctx, "la-alpha", "urgent", "tester"); err != nil {
+		t.Fatalf("failed to add label: %v", err)
+	}
+	if err := store.AddLabel(ctx, "la-beta", "review", "tester"); err != nil {
+		t.Fatalf("failed to add label: %v", err)
+	}
+
+	// LabelsAny with two labels should return both labeled issues.
+	result, err := store.GetReadyWork(ctx, types.WorkFilter{
+		LabelsAny: []string{"urgent", "review"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		ids := make([]string, len(result))
+		for i, r := range result {
+			ids[i] = r.ID
+		}
+		t.Fatalf("expected 2 results with LabelsAny, got %d: %v", len(result), ids)
+	}
+	got := map[string]bool{}
+	for _, r := range result {
+		got[r.ID] = true
+	}
+	if !got["la-alpha"] || !got["la-beta"] {
+		t.Errorf("expected la-alpha and la-beta, got %v", got)
+	}
+
+	// LabelsAny with one label should return only that issue.
+	result, err = store.GetReadyWork(ctx, types.WorkFilter{
+		LabelsAny: []string{"urgent"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0].ID != "la-alpha" {
+		t.Errorf("expected [la-alpha], got %v", result)
+	}
+}
