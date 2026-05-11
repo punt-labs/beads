@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/doltserver"
 	"github.com/steveyegge/beads/internal/lockfile"
@@ -41,6 +42,15 @@ func usesProxiedServer() bool {
 // newDoltStore creates a storage backend from an explicit config.
 // Used by bd init and PersistentPreRun.
 func newDoltStore(ctx context.Context, cfg *dolt.Config) (storage.DoltStorage, error) {
+	// Apply central config defaults (TLS, host, port from
+	// ~/.config/beads/server.json) so the init path gets the same
+	// defaults as the config-based paths.
+	dolt.ApplyEnvAndCentralDefaults(cfg)
+
+	// Push IssuePrefix into viper so ReadConfigPrefix can resolve it
+	// without a DB round-trip.
+	pushPrefixToViper(cfg.IssuePrefix)
+
 	if cfg.ProxiedServer {
 		// TODO: this should not be a store
 		// it should be a uow provider
@@ -81,6 +91,9 @@ func acquireEmbeddedLock(beadsDir string, serverMode bool) (util.Unlocker, error
 // auto-sanitized to underscores and the fix is persisted to metadata.json.
 func newDoltStoreFromConfig(ctx context.Context, beadsDir string) (storage.DoltStorage, error) {
 	cfg, err := configfile.Load(beadsDir)
+	if err == nil && cfg != nil {
+		pushPrefixToViper(cfg.IssuePrefix)
+	}
 	if err == nil && cfg != nil && cfg.IsDoltProxiedServerMode() {
 		// TODO: this needs to be uow provider
 		return nil, fmt.Errorf("proxy server store should be uow provider")
@@ -154,6 +167,9 @@ func migrateHyphenatedDB(beadsDir string, cfg *configfile.Config, oldName, newNa
 // hydration from mutating foreign projects (GH#3231).
 func newReadOnlyStoreFromConfig(ctx context.Context, beadsDir string) (storage.DoltStorage, error) {
 	cfg, err := configfile.Load(beadsDir)
+	if err == nil && cfg != nil {
+		pushPrefixToViper(cfg.IssuePrefix)
+	}
 	if err == nil && cfg != nil && cfg.IsDoltProxiedServerMode() {
 		// TODO: this needs to be uow provider
 		return nil, fmt.Errorf("proxy server store needs to be uow provider")
@@ -175,4 +191,13 @@ func newReadOnlyStoreFromConfig(ctx context.Context, beadsDir string) (storage.D
 		database = sanitized
 	}
 	return embeddeddolt.Open(ctx, beadsDir, database, "main")
+}
+
+// pushPrefixToViper pushes the issue prefix into viper if it is non-empty
+// and the viper key is not already set. This makes the prefix available to
+// ReadConfigPrefix without a DB round-trip.
+func pushPrefixToViper(prefix string) {
+	if prefix != "" && config.GetString("issue-prefix") == "" {
+		config.Set("issue-prefix", prefix)
+	}
 }

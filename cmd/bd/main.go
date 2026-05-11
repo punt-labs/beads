@@ -956,6 +956,7 @@ var rootCmd = &cobra.Command{
 			// and runtime port can diverge (e.g., tunnel on 3308 vs local on 3307).
 			doltCfg.ServerPassword = cfg.GetDoltServerPasswordForPort(doltCfg.ServerPort)
 			doltCfg.ServerTLS = cfg.GetDoltServerTLS()
+			doltCfg.IssuePrefix = cfg.IssuePrefix
 		} else if cfgErr == nil {
 			// Load returned (nil, nil) — no config file found.
 			// Fall back to the canonical default database name; matches the
