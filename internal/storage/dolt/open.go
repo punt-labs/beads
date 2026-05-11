@@ -249,30 +249,14 @@ func applyResolvedConfig(beadsDir string, fileCfg *configfile.Config, cfg *Confi
 	}
 }
 
-// ApplyCentralConfigDefaults applies the central server config
-// (~/.config/beads/server.json or BEADS_CENTRAL_CONFIG override) onto a
-// configfile.Config in place. This is the exported wrapper around the
-// package-private applyCentralConfigDefaults; cmd/bd's PersistentPreRun
-// calls it so subsequent cfg.Get* methods see central-derived defaults.
-//
-// Without this, runtime commands silently ignore central config (e.g.
-// dolt_server_tls: true), even though NewFromConfigWithCLIOptions —
-// which only the doctor and a few helpers use — does honor it. See
-// docs/INIT_TLS_BUG.md (or the related upstream PR) for the full
-// architectural picture.
+// ApplyCentralConfigDefaults exports applyCentralConfigDefaults for cmd/bd's PersistentPreRun.
 func ApplyCentralConfigDefaults(fileCfg *configfile.Config) {
 	applyCentralConfigDefaults(fileCfg)
 }
 
-// ApplyEnvAndCentralDefaults populates server-connection fields on a
-// dolt.Config from environment variables and the central server.json,
-// without requiring a metadata.json. Used by bd init, where metadata.json
-// is being created and configfile.Load is not applicable.
-//
-// Mirrors applyResolvedConfig for the four credential/connection fields
-// the runtime path resolves (host, user, password, TLS). Init reads
-// host/port/user from CLI flags before calling this; this call only fills
-// in fields the CLI flags didn't set, so explicit flags always win.
+// ApplyEnvAndCentralDefaults fills server-connection fields from env vars
+// and ~/.config/beads/server.json. Used by bd init (before metadata.json exists).
+// Explicit CLI flags win — this only fills empty fields.
 func ApplyEnvAndCentralDefaults(cfg *Config) {
 	fileCfg := configfile.DefaultConfig()
 	applyCentralConfigDefaults(fileCfg)
