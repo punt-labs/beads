@@ -496,8 +496,19 @@ func IsDoltNothingToCommit(err error) bool {
 		(strings.Contains(s, "no changes") && strings.Contains(s, "commit"))
 }
 
-// ReadConfigPrefix reads and normalizes issue_prefix from the config table.
+// ReadConfigPrefix reads and normalizes issue_prefix.
+//
+// Resolution order:
+//  1. config.yaml / viper "issue-prefix" (pushed by the store factory from
+//     configfile.Config.IssuePrefix or metadata.json issue_prefix)
+//  2. DB config table "issue_prefix" row
+//
+// The config.yaml shortcut avoids a DB round-trip for the common case where
+// the factory has already resolved the prefix from metadata.json.
 func ReadConfigPrefix(ctx context.Context, tx *sql.Tx) (string, error) {
+	if p := config.GetString("issue-prefix"); p != "" {
+		return strings.TrimSuffix(p, "-"), nil
+	}
 	var configPrefix string
 	err := tx.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", "issue_prefix").Scan(&configPrefix)
 	if err == sql.ErrNoRows || configPrefix == "" {

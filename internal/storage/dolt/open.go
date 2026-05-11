@@ -271,3 +271,31 @@ func applyCentralConfigDefaults(fileCfg *configfile.Config) {
 
 	configfile.ApplyCentralDefaults(fileCfg, centralCfg)
 }
+
+// ApplyEnvAndCentralDefaults applies central config defaults (TLS, host,
+// port) to a dolt.Config by bridging through configfile.Config. This is
+// used by the store factory's newDoltStore path (explicit-config init)
+// which receives a dolt.Config directly and does not load metadata.json.
+//
+// The flow: dolt.Config server fields -> temporary configfile.Config ->
+// applyCentralConfigDefaults -> copy non-zero central defaults back.
+func ApplyEnvAndCentralDefaults(cfg *Config) {
+	fileCfg := &configfile.Config{
+		DoltServerHost: cfg.ServerHost,
+		DoltServerPort: cfg.ServerPort,
+		DoltServerTLS:  cfg.ServerTLS,
+	}
+	applyCentralConfigDefaults(fileCfg)
+
+	// Copy back only fields that were zero in the original config,
+	// preserving any explicit values the caller already set.
+	if cfg.ServerHost == "" {
+		cfg.ServerHost = fileCfg.DoltServerHost
+	}
+	if cfg.ServerPort == 0 {
+		cfg.ServerPort = fileCfg.DoltServerPort
+	}
+	if !cfg.ServerTLS {
+		cfg.ServerTLS = fileCfg.DoltServerTLS
+	}
+}

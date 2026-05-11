@@ -221,6 +221,12 @@ type Config struct {
 	RemoteUser     string // Hosted Dolt remote user (set via DOLT_REMOTE_USER env var)
 	RemotePassword string // Hosted Dolt remote password (set via DOLT_REMOTE_PASSWORD env var)
 
+	// IssuePrefix is the per-project prefix for generating issue IDs
+	// (e.g. "hq" produces IDs like "hq-1"). Populated from
+	// configfile.Config.IssuePrefix by the store factory so that
+	// ReadConfigPrefix can resolve the prefix without a DB round-trip.
+	IssuePrefix string
+
 	// SyncRemote holds the effective sync remote URL (from sync.remote
 	// or deprecated sync.git-remote). Used for context-aware error hints.
 	SyncRemote string

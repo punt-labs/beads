@@ -49,6 +49,13 @@ type Config struct {
 	// shared-server mode is active. Empty means no global database available.
 	GlobalDoltDatabase string `json:"global_dolt_database,omitempty"`
 
+	// IssuePrefix is the per-project prefix used for generating issue IDs
+	// (e.g. "hq" produces IDs like "hq-1"). Populated from config.yaml
+	// issue-prefix or metadata.json issue_prefix. The store factory pushes
+	// this into viper so ReadConfigPrefix can fall back to it before
+	// querying the DB config table.
+	IssuePrefix string `json:"issue_prefix,omitempty"`
+
 	// Stale closed issues check configuration
 	// 0 = disabled (default), positive = threshold in days
 	StaleClosedIssuesDays int `json:"stale_closed_issues_days,omitempty"`
