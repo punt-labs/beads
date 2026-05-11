@@ -263,6 +263,9 @@ func ApplyEnvAndCentralDefaults(cfg *Config) {
 	if cfg.ServerHost == "" {
 		cfg.ServerHost = fileCfg.GetDoltServerHost()
 	}
+	if cfg.ServerPort == 0 {
+		cfg.ServerPort = fileCfg.DoltServerPort
+	}
 	if cfg.ServerUser == "" {
 		cfg.ServerUser = fileCfg.GetDoltServerUser()
 	}
