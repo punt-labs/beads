@@ -846,27 +846,25 @@ func TestCreateSuite(t *testing.T) {
 
 	// GH#541: directory labels auto-applied on create when --labels not passed
 	t.Run("DirectoryLabelsAutoApplied", func(t *testing.T) {
-		// Set up config.yaml with directory.labels mapping to the current directory
+		// Set up config.yaml with directory.labels mapping
 		cfgDir := t.TempDir()
 		beadsCfgDir := filepath.Join(cfgDir, ".beads")
 		if err := os.MkdirAll(beadsCfgDir, 0o755); err != nil {
-			t.Fatalf("failed to create .beads dir: %v", err)
+			t.Fatalf("creating .beads dir: %v", err)
 		}
 
-		// The config maps the cfgDir suffix to label "my-project"
 		dirBaseName := filepath.Base(cfgDir)
 		cfgContent := "directory:\n  labels:\n    " + dirBaseName + ": my-project\n"
 		if err := os.WriteFile(filepath.Join(beadsCfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
-			t.Fatalf("failed to write config.yaml: %v", err)
+			t.Fatalf("writing config.yaml: %v", err)
 		}
 
-		// Change CWD so config picks up the directory label
 		origDir, err := os.Getwd()
 		if err != nil {
-			t.Fatalf("failed to get cwd: %v", err)
+			t.Fatalf("getting cwd: %v", err)
 		}
 		if err := os.Chdir(cfgDir); err != nil {
-			t.Fatalf("failed to chdir: %v", err)
+			t.Fatalf("chdir: %v", err)
 		}
 		defer os.Chdir(origDir)
 
@@ -874,14 +872,15 @@ func TestCreateSuite(t *testing.T) {
 		if err := config.Initialize(); err != nil {
 			t.Fatalf("config.Initialize: %v", err)
 		}
+		t.Cleanup(config.ResetForTesting)
 
-		// Verify GetDirectoryLabels returns the configured label
-		dirLabels := config.GetDirectoryLabels()
-		if len(dirLabels) != 1 || dirLabels[0] != "my-project" {
-			t.Fatalf("expected directory labels [my-project], got %v", dirLabels)
+		// Test the extracted function: no flag changed, should append directory labels
+		got := mergeDirectoryLabels(nil, false)
+		if len(got) != 1 || got[0] != "my-project" {
+			t.Errorf("expected [my-project], got %v", got)
 		}
 
-		// Create an issue and auto-apply directory labels (simulates create handler)
+		// Verify the label can be persisted via the store
 		issue := &types.Issue{
 			Title:     "Issue with auto directory label",
 			Priority:  2,
@@ -889,46 +888,42 @@ func TestCreateSuite(t *testing.T) {
 			IssueType: types.TypeTask,
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
-			t.Fatalf("failed to create issue: %v", err)
+			t.Fatalf("creating issue: %v", err)
 		}
-
-		// Simulate: no --labels flag passed, so auto-apply directory labels
-		for _, l := range dirLabels {
+		for _, l := range got {
 			if err := s.AddLabel(ctx, issue.ID, l, "test"); err != nil {
-				t.Fatalf("failed to add directory label %s: %v", l, err)
+				t.Fatalf("adding label %s: %v", l, err)
 			}
 		}
-
 		labels, err := s.GetLabels(ctx, issue.ID)
 		if err != nil {
-			t.Fatalf("failed to get labels: %v", err)
+			t.Fatalf("getting labels: %v", err)
 		}
 		if len(labels) != 1 || labels[0] != "my-project" {
-			t.Errorf("expected labels [my-project], got %v", labels)
+			t.Errorf("expected stored labels [my-project], got %v", labels)
 		}
 	})
 
 	// GH#541: explicit --labels suppresses directory label auto-apply
 	t.Run("DirectoryLabelsNotAppliedWhenExplicitLabels", func(t *testing.T) {
-		// Set up config with directory labels (reuse same pattern)
 		cfgDir := t.TempDir()
 		beadsCfgDir := filepath.Join(cfgDir, ".beads")
 		if err := os.MkdirAll(beadsCfgDir, 0o755); err != nil {
-			t.Fatalf("failed to create .beads dir: %v", err)
+			t.Fatalf("creating .beads dir: %v", err)
 		}
 
 		dirBaseName := filepath.Base(cfgDir)
 		cfgContent := "directory:\n  labels:\n    " + dirBaseName + ": auto-label\n"
 		if err := os.WriteFile(filepath.Join(beadsCfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
-			t.Fatalf("failed to write config.yaml: %v", err)
+			t.Fatalf("writing config.yaml: %v", err)
 		}
 
 		origDir, err := os.Getwd()
 		if err != nil {
-			t.Fatalf("failed to get cwd: %v", err)
+			t.Fatalf("getting cwd: %v", err)
 		}
 		if err := os.Chdir(cfgDir); err != nil {
-			t.Fatalf("failed to chdir: %v", err)
+			t.Fatalf("chdir: %v", err)
 		}
 		defer os.Chdir(origDir)
 
@@ -936,47 +931,24 @@ func TestCreateSuite(t *testing.T) {
 		if err := config.Initialize(); err != nil {
 			t.Fatalf("config.Initialize: %v", err)
 		}
+		t.Cleanup(config.ResetForTesting)
 
-		// Verify directory labels are configured
-		dirLabels := config.GetDirectoryLabels()
-		if len(dirLabels) == 0 {
+		// Confirm directory labels are configured
+		if dirLabels := config.GetDirectoryLabels(); len(dirLabels) == 0 {
 			t.Fatal("expected directory labels to be configured")
 		}
 
-		// Create issue with explicit user labels (simulates --labels=explicit)
-		issue := &types.Issue{
-			Title:     "Issue with explicit labels only",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-		}
-		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
-			t.Fatalf("failed to create issue: %v", err)
+		// Test the extracted function: flag changed, should return only user labels
+		got := mergeDirectoryLabels([]string{"explicit"}, true)
+		if len(got) != 1 || got[0] != "explicit" {
+			t.Errorf("expected [explicit], got %v", got)
 		}
 
-		// Simulate: --labels was explicitly passed, so do NOT auto-apply directory labels
-		userLabels := []string{"explicit"}
-		for _, l := range userLabels {
-			if err := s.AddLabel(ctx, issue.ID, l, "test"); err != nil {
-				t.Fatalf("failed to add label %s: %v", l, err)
+		// Verify directory label was not included
+		for _, l := range got {
+			if l == "auto-label" {
+				t.Error("directory label 'auto-label' should not be present when flag was changed")
 			}
-		}
-
-		labels, err := s.GetLabels(ctx, issue.ID)
-		if err != nil {
-			t.Fatalf("failed to get labels: %v", err)
-		}
-		if len(labels) != 1 || labels[0] != "explicit" {
-			t.Errorf("expected labels [explicit], got %v", labels)
-		}
-
-		// Verify auto-label was NOT applied
-		labelMap := make(map[string]bool)
-		for _, l := range labels {
-			labelMap[l] = true
-		}
-		if labelMap["auto-label"] {
-			t.Error("directory label 'auto-label' should not be applied when --labels is explicit")
 		}
 	})
 
