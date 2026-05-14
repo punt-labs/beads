@@ -148,6 +148,13 @@ var createCmd = &cobra.Command{
 			labels = append(labels, labelAlias...)
 		}
 
+		// Auto-apply directory labels when no --labels flag was explicitly passed (GH#541)
+		if !cmd.Flags().Changed("labels") && !cmd.Flags().Changed("label") {
+			if dirLabels := config.GetDirectoryLabels(); len(dirLabels) > 0 {
+				labels = append(labels, dirLabels...)
+			}
+		}
+
 		explicitID, _ := cmd.Flags().GetString("id")
 		parentID, _ := cmd.Flags().GetString("parent")
 		externalRef, _ := cmd.Flags().GetString("external-ref")
