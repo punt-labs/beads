@@ -4,10 +4,12 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -905,6 +907,98 @@ func TestCreateSuite(t *testing.T) {
 
 		if retrievedIssue.SourceRepo != "/path/to/custom/repo" {
 			t.Errorf("expected source_repo '/path/to/custom/repo', got %q", retrievedIssue.SourceRepo)
+		}
+	})
+
+	t.Run("DirectoryLabelsAutoApplied", func(t *testing.T) {
+		// Set up a temp directory with .beads/config.yaml containing directory.labels
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0o750); err != nil {
+			t.Fatalf("failed to create .beads dir: %v", err)
+		}
+		configYAML := "directory:\n  labels:\n    " + filepath.Base(tmpDir) + ": auto-label\n"
+		if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(configYAML), 0o644); err != nil {
+			t.Fatalf("failed to write config.yaml: %v", err)
+		}
+
+		// chdir into the temp directory so GetDirectoryLabels sees it
+		origDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get cwd: %v", err)
+		}
+		if err := os.Chdir(tmpDir); err != nil {
+			t.Fatalf("failed to chdir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		config.ResetForTesting()
+		if err := config.Initialize(); err != nil {
+			t.Fatalf("config.Initialize() failed: %v", err)
+		}
+		t.Cleanup(config.ResetForTesting)
+
+		// When no flag was explicitly changed, directory labels should be merged
+		got := mergeDirectoryLabels(nil, false)
+		if len(got) != 1 || got[0] != "auto-label" {
+			t.Errorf("expected [auto-label], got %v", got)
+		}
+
+		// Verify the label round-trips through the store
+		issue := &types.Issue{
+			Title:     "Auto-label test",
+			Priority:  2,
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		}
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("failed to create issue: %v", err)
+		}
+		for _, l := range got {
+			if err := s.AddLabel(ctx, issue.ID, l, "test"); err != nil {
+				t.Fatalf("failed to add label %s: %v", l, err)
+			}
+		}
+		labels, err := s.GetLabels(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("failed to get labels: %v", err)
+		}
+		if len(labels) != 1 || labels[0] != "auto-label" {
+			t.Errorf("expected [auto-label] from store, got %v", labels)
+		}
+	})
+
+	t.Run("DirectoryLabelsNotAppliedWhenExplicitLabels", func(t *testing.T) {
+		// Same config setup as above
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0o750); err != nil {
+			t.Fatalf("failed to create .beads dir: %v", err)
+		}
+		configYAML := "directory:\n  labels:\n    " + filepath.Base(tmpDir) + ": auto-label\n"
+		if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte(configYAML), 0o644); err != nil {
+			t.Fatalf("failed to write config.yaml: %v", err)
+		}
+
+		origDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get cwd: %v", err)
+		}
+		if err := os.Chdir(tmpDir); err != nil {
+			t.Fatalf("failed to chdir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		config.ResetForTesting()
+		if err := config.Initialize(); err != nil {
+			t.Fatalf("config.Initialize() failed: %v", err)
+		}
+		t.Cleanup(config.ResetForTesting)
+
+		// When flags were explicitly changed, directory labels should NOT be merged
+		got := mergeDirectoryLabels([]string{"explicit"}, true)
+		if len(got) != 1 || got[0] != "explicit" {
+			t.Errorf("expected [explicit], got %v", got)
 		}
 	})
 }
