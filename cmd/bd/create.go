@@ -148,6 +148,9 @@ var createCmd = &cobra.Command{
 			labels = append(labels, labelAlias...)
 		}
 
+		// Auto-apply directory labels when no --labels flag was explicitly passed (GH#541)
+		labels = mergeDirectoryLabels(labels, cmd.Flags().Changed("labels") || cmd.Flags().Changed("label"))
+
 		explicitID, _ := cmd.Flags().GetString("id")
 		parentID, _ := cmd.Flags().GetString("parent")
 		externalRef, _ := cmd.Flags().GetString("external-ref")
@@ -777,6 +780,18 @@ func buildCreateIssue(params createIssueParams) *types.Issue {
 		DeferUntil:         params.DeferUntil,
 		Metadata:           params.Metadata,
 	}
+}
+
+// mergeDirectoryLabels appends directory-configured labels when the user
+// did not explicitly pass --labels.
+func mergeDirectoryLabels(userLabels []string, flagChanged bool) []string {
+	if flagChanged {
+		return userLabels
+	}
+	if dirLabels := config.GetDirectoryLabels(); len(dirLabels) > 0 {
+		return append(userLabels, dirLabels...)
+	}
+	return userLabels
 }
 
 func renderCreateDryRunPreview(issue *types.Issue, labels, deps []string) {

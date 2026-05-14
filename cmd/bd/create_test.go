@@ -4,10 +4,12 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -839,6 +841,114 @@ func TestCreateSuite(t *testing.T) {
 		}
 		if labelMap["priority:high"] {
 			t.Error("did not expect inherited label 'priority:high'")
+		}
+	})
+
+	// GH#541: directory labels auto-applied on create when --labels not passed
+	t.Run("DirectoryLabelsAutoApplied", func(t *testing.T) {
+		// Set up config.yaml with directory.labels mapping
+		cfgDir := t.TempDir()
+		beadsCfgDir := filepath.Join(cfgDir, ".beads")
+		if err := os.MkdirAll(beadsCfgDir, 0o755); err != nil {
+			t.Fatalf("creating .beads dir: %v", err)
+		}
+
+		dirBaseName := filepath.Base(cfgDir)
+		cfgContent := "directory:\n  labels:\n    " + dirBaseName + ": my-project\n"
+		if err := os.WriteFile(filepath.Join(beadsCfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
+			t.Fatalf("writing config.yaml: %v", err)
+		}
+
+		origDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getting cwd: %v", err)
+		}
+		if err := os.Chdir(cfgDir); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+		defer os.Chdir(origDir)
+
+		config.ResetForTesting()
+		if err := config.Initialize(); err != nil {
+			t.Fatalf("config.Initialize: %v", err)
+		}
+		t.Cleanup(config.ResetForTesting)
+
+		// Test the extracted function: no flag changed, should append directory labels
+		got := mergeDirectoryLabels(nil, false)
+		if len(got) != 1 || got[0] != "my-project" {
+			t.Errorf("expected [my-project], got %v", got)
+		}
+
+		// Verify the label can be persisted via the store
+		issue := &types.Issue{
+			Title:     "Issue with auto directory label",
+			Priority:  2,
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		}
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("creating issue: %v", err)
+		}
+		for _, l := range got {
+			if err := s.AddLabel(ctx, issue.ID, l, "test"); err != nil {
+				t.Fatalf("adding label %s: %v", l, err)
+			}
+		}
+		labels, err := s.GetLabels(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("getting labels: %v", err)
+		}
+		if len(labels) != 1 || labels[0] != "my-project" {
+			t.Errorf("expected stored labels [my-project], got %v", labels)
+		}
+	})
+
+	// GH#541: explicit --labels suppresses directory label auto-apply
+	t.Run("DirectoryLabelsNotAppliedWhenExplicitLabels", func(t *testing.T) {
+		cfgDir := t.TempDir()
+		beadsCfgDir := filepath.Join(cfgDir, ".beads")
+		if err := os.MkdirAll(beadsCfgDir, 0o755); err != nil {
+			t.Fatalf("creating .beads dir: %v", err)
+		}
+
+		dirBaseName := filepath.Base(cfgDir)
+		cfgContent := "directory:\n  labels:\n    " + dirBaseName + ": auto-label\n"
+		if err := os.WriteFile(filepath.Join(beadsCfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
+			t.Fatalf("writing config.yaml: %v", err)
+		}
+
+		origDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getting cwd: %v", err)
+		}
+		if err := os.Chdir(cfgDir); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+		defer os.Chdir(origDir)
+
+		config.ResetForTesting()
+		if err := config.Initialize(); err != nil {
+			t.Fatalf("config.Initialize: %v", err)
+		}
+		t.Cleanup(config.ResetForTesting)
+
+		// Confirm directory labels are configured
+		if dirLabels := config.GetDirectoryLabels(); len(dirLabels) == 0 {
+			t.Fatal("expected directory labels to be configured")
+		}
+
+		// Test the extracted function: flag changed, should return only user labels
+		got := mergeDirectoryLabels([]string{"explicit"}, true)
+		if len(got) != 1 || got[0] != "explicit" {
+			t.Errorf("expected [explicit], got %v", got)
+		}
+
+		// Verify directory label was not included
+		for _, l := range got {
+			if l == "auto-label" {
+				t.Error("directory label 'auto-label' should not be present when flag was changed")
+			}
 		}
 	})
 
