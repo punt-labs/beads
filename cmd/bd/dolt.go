@@ -1599,7 +1599,7 @@ func testDoltConnection() {
 		fmt.Printf("%s\n", ui.RenderPass("✓ Connection successful"))
 	} else {
 		fmt.Printf("%s\n", ui.RenderWarn("✗ Connection failed"))
-		fmt.Println("\nStart the server with: bd dolt start")
+		fmt.Printf("\n%s\n", serverDownHint(cfg, host, port))
 		os.Exit(1)
 	}
 
@@ -1720,6 +1720,29 @@ func testHTTPConnectivity(url string) bool {
 	return true
 }
 
+// isLocalDoltHost reports whether host refers to the local machine, where
+// auto-start and `bd dolt start` are meaningful.
+func isLocalDoltHost(host string) bool {
+	switch host {
+	case "", "127.0.0.1", "localhost", "::1", "[::1]":
+		return true
+	}
+	return false
+}
+
+// serverDownHint returns advice for an unreachable Dolt server. When the
+// workspace targets a remote server, "bd dolt start" (which starts a LOCAL
+// server) is the wrong fix and would mask the real problem, so steer the user
+// toward reachability / BEADS_DOLT_* env checks instead (pkit-zj7y).
+func serverDownHint(cfg *configfile.Config, host string, port int) string {
+	if cfg != nil && strings.ToLower(cfg.DoltMode) == configfile.DoltModeServer && !isLocalDoltHost(host) {
+		return fmt.Sprintf("This workspace targets a remote Dolt server (%s:%d). Check that it is "+
+			"reachable and that BEADS_DOLT_* is exported in this shell (direnv). "+
+			"'bd dolt start' only starts a LOCAL server and will not help here.", host, port)
+	}
+	return "Start the server with: bd dolt start"
+}
+
 // openDoltServerConnection opens a direct MySQL connection to the Dolt server
 // using config from the beads directory. This bypasses getStore() which isn't
 // initialized for dolt subcommands (beads-9vt). Connects without selecting a
@@ -1768,7 +1791,7 @@ func openDoltServerConnection() (*sql.DB, func()) {
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		fmt.Fprintf(os.Stderr, "Error: cannot reach Dolt server at %s:%d: %v\n", host, port, err)
-		fmt.Fprintln(os.Stderr, "Start the server with: bd dolt start")
+		fmt.Fprintln(os.Stderr, serverDownHint(cfg, host, port))
 		os.Exit(1)
 	}
 

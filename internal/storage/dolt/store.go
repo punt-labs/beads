@@ -1046,6 +1046,11 @@ func newServerMode(ctx context.Context, cfg *Config) (*DoltStore, error) {
 				return nil, fmt.Errorf("Dolt server auto-started but still unreachable at %s: %w\n\n"+
 					"Check logs: %s", addr, dialErr, doltserver.LogPath(resolvedBeadsDir))
 			}
+			// Visible tripwire (pkit-zj7y): this server-mode workspace is now
+			// served by a LOCAL auto-started dolt sql-server, not a configured
+			// remote. If the workspace expects a remote/hosted server, this line
+			// flags that the BEADS_DOLT_* env is likely missing (direnv).
+			fmt.Fprintf(os.Stderr, "Note: using a local auto-started Dolt sql-server (%s), not a configured remote server.\n", addr)
 		} else {
 			if breaker != nil {
 				breaker.RecordFailure()

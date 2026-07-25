@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -74,6 +75,7 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 		skipAgents, _ := cmd.Flags().GetBool("skip-agents")
 		force, _ := cmd.Flags().GetBool("force")
 		reinitLocal, _ := cmd.Flags().GetBool("reinit-local")
+		migrateBackend, _ := cmd.Flags().GetBool("migrate-backend")
 		discardRemote, _ := cmd.Flags().GetBool("discard-remote")
 		nonInteractiveFlag, _ := cmd.Flags().GetBool("non-interactive")
 		roleFlag, _ := cmd.Flags().GetString("role")
@@ -203,6 +205,16 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 		// persist shared-server intent in YAML while still creating an embedded
 		// store and recording dolt_mode=embedded in metadata.json (GH#2946).
 		if sharedServer || strings.EqualFold(os.Getenv("BEADS_DOLT_SHARED_SERVER"), "true") || os.Getenv("BEADS_DOLT_SHARED_SERVER") == "1" {
+			initServerMode = true
+		}
+
+		// Seed server-mode intent from the committed metadata.json. A workspace
+		// already configured for a Dolt server must re-init in server mode even
+		// when the direnv BEADS_DOLT_* env is absent, so an env-stripped
+		// subprocess fails loudly against the (possibly down) server instead of
+		// silently re-initializing embedded over it (pkit-zj7y). --migrate-backend
+		// is the explicit opt-out for a genuine server→embedded migration.
+		if !initServerMode && !migrateBackend && committedServerModeIntent() {
 			initServerMode = true
 		}
 
@@ -1006,9 +1018,20 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 				}
 			}
 
+			// Authorize a server→embedded migration only when the user asked
+			// for it explicitly; otherwise Save's never-downgrade guard blocks
+			// a silent backend flip (pkit-zj7y).
+			if migrateBackend {
+				cfg.AllowBackendMigration()
+			}
 			if err := cfg.Save(beadsDir); err != nil {
+				// A refused backend downgrade is fatal — never proceed to record
+				// embedded metadata over a server workspace. Other write errors
+				// remain non-fatal to preserve existing init behavior.
+				if errors.Is(err, configfile.ErrBackendDowngrade) {
+					FatalError("%v", err)
+				}
 				fmt.Fprintf(os.Stderr, "Warning: failed to create metadata.json: %v\n", err)
-				// Non-fatal - continue anyway
 			}
 
 			// Write project identity to database for cross-project verification (GH#2372)
@@ -1487,6 +1510,7 @@ func init() {
 	initCmd.Flags().Bool("skip-agents", false, "Skip AGENTS.md and Claude settings generation")
 	initCmd.Flags().Bool("force", false, "Deprecated alias for --reinit-local. Bypasses only the LOCAL data-safety guard; does NOT authorize remote divergence (see 'bd help init-safety').")
 	initCmd.Flags().Bool("reinit-local", false, "Re-initialize local .beads/ over existing local data. Does NOT authorize remote divergence; see --discard-remote.")
+	initCmd.Flags().Bool("migrate-backend", false, "Authorize migrating an existing dolt_mode=server workspace to embedded. Without this, init refuses to downgrade a committed server workspace (pkit-zj7y).")
 	initCmd.Flags().Bool("discard-remote", false, "Authorize discarding the configured remote's Dolt history when re-initializing. Requires --destroy-token in non-interactive mode; see 'bd help init-safety'.")
 	initCmd.Flags().Bool("from-jsonl", false, "Import issues from .beads/issues.jsonl instead of git history")
 	initCmd.Flags().String("destroy-token", "", "Explicit confirmation token for destructive re-init in non-interactive mode (format: 'DESTROY-<prefix>')")
@@ -1669,9 +1693,37 @@ Aborting.`, ui.RenderWarn("⚠"), location, ui.RenderAccent("bd list"), prefix)
 				}
 				if result.Reachable && result.Exists {
 					// Server up and DB exists — fall through to "already initialized" error.
+				} else if metadataIsCommitted(beadsDir) {
+					// Server unreachable (or errored) AND metadata.json is committed
+					// to git saying dolt_mode=server: this is an existing server-mode
+					// workspace whose server is merely down — not a fresh clone.
+					// Fail CLOSED. Proceeding would silently re-init embedded over the
+					// committed server config (pkit-zj7y).
+					//
+					// Report the configured endpoint (host + configured/default port),
+					// not the ephemeral dial port which is 0 in standalone mode.
+					addr := host
+					if p := cfg.GetDoltServerPort(); p > 0 {
+						addr = fmt.Sprintf("%s:%d", host, p)
+					}
+					return fmt.Errorf(`
+%s This workspace is already initialized for a Dolt server (%s), but that server is unreachable.
+
+metadata.json (committed) says dolt_mode=server, so this is not a fresh clone.
+Refusing to re-initialize — doing so would silently flip the backend to embedded.
+
+Check the server and your environment:
+  - Is the Dolt sql-server running and reachable at %s?
+  - Are the BEADS_DOLT_* variables exported in this shell (direnv)?
+  - bd dolt status     # inspect Dolt server state
+
+If you genuinely intend to migrate this workspace to an embedded database:
+  bd init --migrate-backend
+
+Aborting.`, ui.RenderWarn("⚠"), addr, addr)
 				} else {
-					// Server unreachable or error during check: this is a fresh clone
-					// with committed metadata.json but no local dolt/ directory.
+					// Server unreachable or error during check AND metadata.json is
+					// not committed: a genuine fresh clone / bootstrap in progress.
 					// Allow init to proceed so the user can bootstrap the database
 					// (e.g. via --from-jsonl). (GH#2433)
 					return nil
@@ -1795,6 +1847,46 @@ func countExistingIssues(_ string) (int, error) {
 //
 // For redirects, checks the redirect target and errors if it already has a database.
 // This prevents accidentally overwriting an existing canonical database (GH#bd-0qel).
+// metadataIsCommitted reports whether .beads/metadata.json is tracked in git.
+// A committed server-mode metadata means the workspace is genuinely
+// initialized — not a fresh clone — so init must fail closed when the server
+// is unreachable rather than silently re-init embedded over it (pkit-zj7y).
+func metadataIsCommitted(beadsDir string) bool {
+	cmd := exec.Command("git", "-C", beadsDir, "ls-files", "--error-unmatch", configfile.ConfigFileName)
+	return cmd.Run() == nil
+}
+
+// committedServerModeIntent reports whether the workspace init would inspect
+// has a metadata.json recording dolt_mode=server. init consults this so a
+// plain `bd init` in a subprocess missing the direnv BEADS_DOLT_* env re-inits
+// in server mode — failing loudly against the (possibly down) server — instead
+// of silently downgrading the backend to embedded (pkit-zj7y). Resolution
+// mirrors checkExistingBeadsData: BEADS_DIR, then worktree fallback, then CWD.
+func committedServerModeIntent() bool {
+	var beadsDir string
+	if envBeadsDir := os.Getenv("BEADS_DIR"); envBeadsDir != "" {
+		beadsDir = utils.CanonicalizePath(envBeadsDir)
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return false
+		}
+		if isGitRepo() && git.IsWorktree() {
+			beadsDir = beads.GetWorktreeFallbackBeadsDir()
+		} else {
+			beadsDir = filepath.Join(cwd, ".beads")
+		}
+	}
+	if beadsDir == "" {
+		return false
+	}
+	cfg, err := configfile.Load(beadsDir)
+	if err != nil || cfg == nil {
+		return false
+	}
+	return strings.ToLower(cfg.DoltMode) == configfile.DoltModeServer
+}
+
 func checkExistingBeadsData(prefix string) error {
 	// Check BEADS_DIR environment variable first (matches FindBeadsDir pattern)
 	// When BEADS_DIR is set, it takes precedence over CWD and worktree checks

@@ -1,6 +1,7 @@
 package configfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,104 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 
 	if loaded.Database != cfg.Database {
 		t.Errorf("Database = %q, want %q", loaded.Database, cfg.Database)
+	}
+}
+
+// seedMetadata writes a metadata.json with the given dolt_mode into beadsDir.
+func seedMetadata(t *testing.T, beadsDir, mode string) {
+	t.Helper()
+	if err := os.MkdirAll(beadsDir, 0750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfg := &Config{Backend: BackendDolt, Database: "dolt", DoltMode: mode, DoltDatabase: "beads"}
+	if err := cfg.Save(beadsDir); err != nil {
+		t.Fatalf("seed Save(%s): %v", mode, err)
+	}
+}
+
+// TestSaveGuardsBackendDowngrade covers the centralized never-downgrade
+// invariant (pkit-zj7y): Save refuses to rewrite an existing dolt_mode=server
+// workspace to embedded unless the caller opts in via AllowBackendMigration.
+func TestSaveGuardsBackendDowngrade(t *testing.T) {
+	tests := map[string]struct {
+		existingMode string // "" means no metadata.json on disk yet
+		newMode      string
+		migrate      bool // caller opted in via AllowBackendMigration
+		wantErr      bool
+	}{
+		"server -> embedded refused":               {existingMode: DoltModeServer, newMode: DoltModeEmbedded, wantErr: true},
+		"server -> embedded allowed with opt-in":   {existingMode: DoltModeServer, newMode: DoltModeEmbedded, migrate: true, wantErr: false},
+		"server -> server allowed (no downgrade)":  {existingMode: DoltModeServer, newMode: DoltModeServer, wantErr: false},
+		"embedded -> embedded allowed":             {existingMode: DoltModeEmbedded, newMode: DoltModeEmbedded, wantErr: false},
+		"embedded -> server allowed (upgrade)":     {existingMode: DoltModeEmbedded, newMode: DoltModeServer, wantErr: false},
+		"fresh dir embedded allowed (no existing)": {existingMode: "", newMode: DoltModeEmbedded, wantErr: false},
+		"fresh dir server allowed (no existing)":   {existingMode: "", newMode: DoltModeServer, wantErr: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			beadsDir := filepath.Join(t.TempDir(), ".beads")
+			if tt.existingMode != "" {
+				seedMetadata(t, beadsDir, tt.existingMode)
+			} else if err := os.MkdirAll(beadsDir, 0750); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+
+			cfg := &Config{Backend: BackendDolt, Database: "dolt", DoltMode: tt.newMode, DoltDatabase: "beads"}
+			if tt.migrate {
+				cfg.AllowBackendMigration()
+			}
+
+			err := cfg.Save(beadsDir)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected Save to refuse the downgrade, got nil")
+				}
+				if !errors.Is(err, ErrBackendDowngrade) {
+					t.Errorf("error must wrap ErrBackendDowngrade, got:\n%s", err)
+				}
+				if !strings.Contains(err.Error(), "--migrate-backend") {
+					t.Errorf("error must name the --migrate-backend opt-in, got:\n%s", err)
+				}
+				if !strings.Contains(err.Error(), "server") || !strings.Contains(err.Error(), "embedded") {
+					t.Errorf("error must state what was refused, got:\n%s", err)
+				}
+				// The on-disk metadata must be untouched by a refused Save.
+				after, loadErr := Load(beadsDir)
+				if loadErr != nil {
+					t.Fatalf("Load after refusal: %v", loadErr)
+				}
+				if after == nil || strings.ToLower(after.DoltMode) != DoltModeServer {
+					t.Errorf("refused Save must leave dolt_mode=server on disk, got: %+v", after)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Save should have succeeded, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestSaveGuardBindsCreatePath models the residual create.go flip
+// (create.go:942 writes DefaultConfig() with DoltMode=embedded). The
+// centralized Save guard binds it: an embedded write over an existing
+// server metadata.json is refused with no explicit opt-in.
+func TestSaveGuardBindsCreatePath(t *testing.T) {
+	beadsDir := filepath.Join(t.TempDir(), ".beads")
+	seedMetadata(t, beadsDir, DoltModeServer)
+
+	// Mirror create.go:939-943.
+	cfg := DefaultConfig()
+	cfg.Backend = BackendDolt
+	cfg.DoltDatabase = "beads"
+	cfg.DoltMode = DoltModeEmbedded
+	cfg.ProjectID = GenerateProjectID()
+
+	if err := cfg.Save(beadsDir); err == nil {
+		t.Fatal("create-path embedded Save over server metadata must be refused")
+	} else if !strings.Contains(err.Error(), "--migrate-backend") {
+		t.Errorf("error must name the --migrate-backend opt-in, got:\n%s", err)
 	}
 }
 

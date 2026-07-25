@@ -3,6 +3,7 @@ package configfile
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,11 @@ import (
 )
 
 const ConfigFileName = "metadata.json"
+
+// ErrBackendDowngrade is returned by Save when it refuses to rewrite an
+// existing dolt_mode=server workspace to embedded without an explicit
+// opt-in. Callers can errors.Is against it to fail closed (pkit-zj7y).
+var ErrBackendDowngrade = errors.New("refusing to downgrade dolt_mode from server to embedded")
 
 type Config struct {
 	Database string `json:"database"`
@@ -65,6 +71,20 @@ type Config struct {
 	// upgrade notifications firing after git operations reset metadata.json.
 	// bd-tok: This field is kept for backwards compatibility when reading old configs.
 	LastBdVersion string `json:"last_bd_version,omitempty"`
+
+	// allowBackendMigration permits Save to persist a downgrade of an
+	// existing dolt_mode=server workspace to embedded. It is off by default
+	// and is not serialized, so a stray init in an env-stripped subprocess
+	// cannot silently flip the backend (pkit-zj7y). Wired only to the
+	// explicit `bd init --migrate-backend` opt-in via AllowBackendMigration.
+	allowBackendMigration bool
+}
+
+// AllowBackendMigration authorizes Save to persist a server→embedded
+// downgrade for this config. Call it only in response to an explicit user
+// opt-in such as `bd init --migrate-backend`.
+func (c *Config) AllowBackendMigration() {
+	c.allowBackendMigration = true
 }
 
 func DefaultConfig() *Config {
@@ -123,6 +143,10 @@ func Load(beadsDir string) (*Config, error) {
 func (c *Config) Save(beadsDir string) error {
 	configPath := ConfigPath(beadsDir)
 
+	if err := c.guardBackendDowngrade(beadsDir); err != nil {
+		return err
+	}
+
 	saved := *c
 	if filepath.IsAbs(saved.DoltDataDir) {
 		saved.DoltDataDir = ""
@@ -147,6 +171,47 @@ func (c *Config) Save(beadsDir string) error {
 	}
 
 	return nil
+}
+
+// guardBackendDowngrade refuses to persist a change that downgrades an
+// existing dolt_mode=server workspace to embedded. This is the centralized
+// last-line backstop against a silent backend flip when bd runs without the
+// server's BEADS_DOLT_* env (pkit-zj7y): init, create, and any future writer
+// route through Save, so all are bound by it. The check reads the committed
+// dolt_mode field directly (not the env-aware IsDoltServerMode) so ambient
+// env cannot mask a downgrade. An explicit opt-in via AllowBackendMigration
+// (bd init --migrate-backend) is the only way through.
+func (c *Config) guardBackendDowngrade(beadsDir string) error {
+	if c.allowBackendMigration {
+		return nil
+	}
+	if strings.ToLower(c.DoltMode) != DoltModeEmbedded {
+		return nil // not writing embedded — nothing to downgrade to
+	}
+	// Read only the canonical metadata.json (not legacy config.json) to avoid
+	// re-triggering Load's migration path, which would call Save recursively.
+	data, err := os.ReadFile(ConfigPath(beadsDir)) // #nosec G304 - controlled path from config
+	if err != nil {
+		return nil // no existing config to protect (fresh init/clone)
+	}
+	var existing Config
+	if err := json.Unmarshal(data, &existing); err != nil {
+		return nil // unreadable existing config — do not block on it
+	}
+	if strings.ToLower(existing.DoltMode) != DoltModeServer {
+		return nil
+	}
+	return fmt.Errorf(`%w for %s
+
+This workspace is committed to a Dolt sql-server, but bd is about to rewrite
+it to embedded mode. This usually means bd is running without the server's
+BEADS_DOLT_* environment (pkit-zj7y).
+
+If the server is genuinely gone and you intend to migrate this workspace to
+an embedded database, re-run with:
+  bd init --migrate-backend
+
+Aborting`, ErrBackendDowngrade, ConfigPath(beadsDir))
 }
 
 func (c *Config) DatabasePath(beadsDir string) string {
