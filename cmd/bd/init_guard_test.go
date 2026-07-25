@@ -7,7 +7,70 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/beads/internal/configfile"
 )
+
+// TestStoreOpenHint verifies that a store-open failure in a committed
+// server-mode workspace steers the user toward server/env checks, not
+// `bd init`, which would silently re-init embedded (pkit-zj7y).
+func TestStoreOpenHint(t *testing.T) {
+	writeMode := func(t *testing.T, mode string) string {
+		t.Helper()
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if mode != "" {
+			data, _ := json.Marshal(map[string]interface{}{"dolt_mode": mode})
+			if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return beadsDir
+	}
+
+	t.Run("server mode warns against bd init", func(t *testing.T) {
+		hint := storeOpenHint(writeMode(t, configfile.DoltModeServer))
+		if !strings.Contains(hint, "BEADS_DOLT_*") {
+			t.Errorf("server-mode hint must mention BEADS_DOLT_* env, got: %q", hint)
+		}
+		if !strings.Contains(hint, "Do NOT run 'bd init'") {
+			t.Errorf("server-mode hint must warn against bd init, got: %q", hint)
+		}
+	})
+
+	t.Run("embedded mode falls back to generic hint", func(t *testing.T) {
+		hint := storeOpenHint(writeMode(t, configfile.DoltModeEmbedded))
+		if strings.Contains(hint, "Do NOT run 'bd init'") {
+			t.Errorf("embedded hint must not carry the server warning, got: %q", hint)
+		}
+	})
+}
+
+// TestServerDownHint verifies the `bd dolt start` advice is suppressed for a
+// remote server workspace (where a local start cannot help) but kept for a
+// local one (pkit-zj7y).
+func TestServerDownHint(t *testing.T) {
+	t.Run("remote server steers away from bd dolt start", func(t *testing.T) {
+		cfg := &configfile.Config{DoltMode: configfile.DoltModeServer}
+		hint := serverDownHint(cfg, "db.hosted.example.com", 3306)
+		if strings.Contains(hint, "bd dolt start\n") || hint == "Start the server with: bd dolt start" {
+			t.Errorf("remote hint must not present bd dolt start as the fix, got: %q", hint)
+		}
+		if !strings.Contains(hint, "BEADS_DOLT_*") {
+			t.Errorf("remote hint must mention BEADS_DOLT_* env, got: %q", hint)
+		}
+	})
+
+	t.Run("local server keeps bd dolt start", func(t *testing.T) {
+		cfg := &configfile.Config{DoltMode: configfile.DoltModeServer}
+		hint := serverDownHint(cfg, "127.0.0.1", 3307)
+		if !strings.Contains(hint, "bd dolt start") {
+			t.Errorf("local hint should keep bd dolt start, got: %q", hint)
+		}
+	})
+}
 
 // gitInitRepo creates a git repo rooted at dir with a usable identity and no
 // commit signing. GIT_CONFIG_COUNT=0 neutralizes any commit.gpgsign /
