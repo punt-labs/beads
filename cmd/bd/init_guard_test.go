@@ -3,10 +3,150 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// gitInitRepo creates a git repo rooted at dir with a usable identity and no
+// commit signing. GIT_CONFIG_COUNT=0 neutralizes any commit.gpgsign /
+// user.signingkey injected via GIT_CONFIG_* env (direnv), which has
+// command-line precedence and would otherwise override the repo-local setting.
+func gitInitRepo(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@t.t"},
+		{"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// gitCommitAll stages and commits everything under dir.
+func gitCommitAll(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "seed"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// writeServerMetadata writes a committed-shape server-mode metadata.json.
+func writeServerMetadata(t *testing.T, beadsDir string) {
+	t.Helper()
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]interface{}{
+		"dolt_mode":     "server",
+		"dolt_database": "beads",
+		"issue_prefix":  "pkit",
+	}
+	data, _ := json.Marshal(metadata)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestInitGuard_CommittedServerUnreachableFailsClosed is the pkit-zj7y guard:
+// when metadata.json is committed saying dolt_mode=server, no local dolt dir
+// exists, and the server is unreachable, init must FAIL CLOSED rather than
+// proceed as a "fresh clone" and silently flip the backend to embedded.
+func TestInitGuard_CommittedServerUnreachableFailsClosed(t *testing.T) {
+	oldServerMode := serverMode
+	serverMode = true
+	defer func() { serverMode = oldServerMode }()
+
+	repo := t.TempDir()
+	setupIsolatedGitConfig(t, t.TempDir())
+	gitInitRepo(t, repo)
+	beadsDir := filepath.Join(repo, ".beads")
+	writeServerMetadata(t, beadsDir)
+	gitCommitAll(t, repo)
+
+	// No dolt/ dir and no server running: the server check is unreachable.
+	err := checkExistingBeadsDataAt(beadsDir, "pkit")
+	if err == nil {
+		t.Fatal("committed server metadata + unreachable server must fail closed, got nil")
+	}
+	for _, want := range []string{"unreachable", "dolt_mode=server", "--migrate-backend"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q, got:\n%s", want, err)
+		}
+	}
+}
+
+// TestInitGuard_UncommittedServerMetadataAllowsInit is the discriminator:
+// the same server metadata that is NOT committed to git is treated as a
+// genuine bootstrap-in-progress, so init is allowed to proceed (GH#2433).
+func TestInitGuard_UncommittedServerMetadataAllowsInit(t *testing.T) {
+	oldServerMode := serverMode
+	serverMode = true
+	defer func() { serverMode = oldServerMode }()
+
+	repo := t.TempDir()
+	setupIsolatedGitConfig(t, t.TempDir())
+	gitInitRepo(t, repo)
+	beadsDir := filepath.Join(repo, ".beads")
+	writeServerMetadata(t, beadsDir) // written but never committed
+
+	err := checkExistingBeadsDataAt(beadsDir, "pkit")
+	if err != nil {
+		t.Errorf("uncommitted server metadata should allow init (bootstrap), got: %v", err)
+	}
+}
+
+// TestCommittedServerModeIntent verifies init seeds server-mode intent from
+// the committed metadata.json so an env-stripped subprocess re-inits in
+// server mode instead of embedded (pkit-zj7y, fix 3).
+func TestCommittedServerModeIntent(t *testing.T) {
+	t.Run("server metadata -> true", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		writeServerMetadata(t, beadsDir)
+		t.Setenv("BEADS_DIR", beadsDir)
+		if !committedServerModeIntent() {
+			t.Error("expected committedServerModeIntent() = true for server metadata")
+		}
+	})
+
+	t.Run("embedded metadata -> false", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(map[string]interface{}{"dolt_mode": "embedded"})
+		if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BEADS_DIR", beadsDir)
+		if committedServerModeIntent() {
+			t.Error("expected committedServerModeIntent() = false for embedded metadata")
+		}
+	})
+
+	t.Run("no metadata -> false", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BEADS_DIR", beadsDir)
+		if committedServerModeIntent() {
+			t.Error("expected committedServerModeIntent() = false when no metadata.json")
+		}
+	})
+}
 
 func TestInitGuardServerMessage(t *testing.T) {
 	tests := map[string]struct {

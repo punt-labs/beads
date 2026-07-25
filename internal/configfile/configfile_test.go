@@ -1,6 +1,7 @@
 package configfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,10 +95,13 @@ func TestSaveGuardsBackendDowngrade(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected Save to refuse the downgrade, got nil")
 				}
+				if !errors.Is(err, ErrBackendDowngrade) {
+					t.Errorf("error must wrap ErrBackendDowngrade, got:\n%s", err)
+				}
 				if !strings.Contains(err.Error(), "--migrate-backend") {
 					t.Errorf("error must name the --migrate-backend opt-in, got:\n%s", err)
 				}
-				if !strings.Contains(err.Error(), `"server"`) || !strings.Contains(err.Error(), `"embedded"`) {
+				if !strings.Contains(err.Error(), "server") || !strings.Contains(err.Error(), "embedded") {
 					t.Errorf("error must state what was refused, got:\n%s", err)
 				}
 				// The on-disk metadata must be untouched by a refused Save.

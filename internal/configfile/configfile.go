@@ -3,6 +3,7 @@ package configfile
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,11 @@ import (
 )
 
 const ConfigFileName = "metadata.json"
+
+// ErrBackendDowngrade is returned by Save when it refuses to rewrite an
+// existing dolt_mode=server workspace to embedded without an explicit
+// opt-in. Callers can errors.Is against it to fail closed (pkit-zj7y).
+var ErrBackendDowngrade = errors.New("refusing to downgrade dolt_mode from server to embedded")
 
 type Config struct {
 	Database string `json:"database"`
@@ -195,7 +201,7 @@ func (c *Config) guardBackendDowngrade(beadsDir string) error {
 	if strings.ToLower(existing.DoltMode) != DoltModeServer {
 		return nil
 	}
-	return fmt.Errorf(`refusing to change dolt_mode from "server" to "embedded" for %s
+	return fmt.Errorf(`%w for %s
 
 This workspace is committed to a Dolt sql-server, but bd is about to rewrite
 it to embedded mode. This usually means bd is running without the server's
@@ -205,7 +211,7 @@ If the server is genuinely gone and you intend to migrate this workspace to
 an embedded database, re-run with:
   bd init --migrate-backend
 
-Aborting`, ConfigPath(beadsDir))
+Aborting`, ErrBackendDowngrade, ConfigPath(beadsDir))
 }
 
 func (c *Config) DatabasePath(beadsDir string) string {
