@@ -123,11 +123,30 @@ func writeServerMetadata(t *testing.T, beadsDir string) {
 	}
 }
 
+// scrubDoltServerEnv clears the BEADS_DOLT_* connection vars for the duration
+// of a test so the init guard resolves the server host locally (127.0.0.1)
+// instead of dialing the ambient server. Without this, a dev shell with
+// direnv-exported BEADS_DOLT_* makes these guard tests connect to the real
+// hosted production DoltDB and take the wrong branch (test hermeticity).
+func scrubDoltServerEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"BEADS_DOLT_SERVER_HOST",
+		"BEADS_DOLT_SERVER_PORT",
+		"BEADS_DOLT_SERVER_TLS",
+		"BEADS_DOLT_SERVER_USER",
+		"BEADS_DOLT_PASSWORD",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
 // TestInitGuard_CommittedServerUnreachableFailsClosed is the pkit-zj7y guard:
 // when metadata.json is committed saying dolt_mode=server, no local dolt dir
 // exists, and the server is unreachable, init must FAIL CLOSED rather than
 // proceed as a "fresh clone" and silently flip the backend to embedded.
 func TestInitGuard_CommittedServerUnreachableFailsClosed(t *testing.T) {
+	scrubDoltServerEnv(t)
 	oldServerMode := serverMode
 	serverMode = true
 	defer func() { serverMode = oldServerMode }()
@@ -155,6 +174,7 @@ func TestInitGuard_CommittedServerUnreachableFailsClosed(t *testing.T) {
 // the same server metadata that is NOT committed to git is treated as a
 // genuine bootstrap-in-progress, so init is allowed to proceed (GH#2433).
 func TestInitGuard_UncommittedServerMetadataAllowsInit(t *testing.T) {
+	scrubDoltServerEnv(t)
 	oldServerMode := serverMode
 	serverMode = true
 	defer func() { serverMode = oldServerMode }()
@@ -348,6 +368,10 @@ func TestInitGuard_FreshCloneWithMetadataJSON(t *testing.T) {
 	// GH#2433: On a fresh clone, metadata.json is committed (tracked by git)
 	// but dolt/ directory is gitignored. The init guard should recognize this
 	// as a fresh clone and allow init to proceed.
+	//
+	// Scrub BEADS_DOLT_* so the server-mode subtests resolve the host locally
+	// instead of dialing the ambient (possibly hosted, production) DoltDB.
+	scrubDoltServerEnv(t)
 
 	t.Run("server_mode_metadata_no_dolt_dir_allows_init", func(t *testing.T) {
 		// Switch to server mode for this subtest

@@ -1699,21 +1699,28 @@ Aborting.`, ui.RenderWarn("⚠"), location, ui.RenderAccent("bd list"), prefix)
 					// workspace whose server is merely down — not a fresh clone.
 					// Fail CLOSED. Proceeding would silently re-init embedded over the
 					// committed server config (pkit-zj7y).
+					//
+					// Report the configured endpoint (host + configured/default port),
+					// not the ephemeral dial port which is 0 in standalone mode.
+					addr := host
+					if p := cfg.GetDoltServerPort(); p > 0 {
+						addr = fmt.Sprintf("%s:%d", host, p)
+					}
 					return fmt.Errorf(`
-%s This workspace is already initialized for a Dolt server (%s:%d), but that server is unreachable.
+%s This workspace is already initialized for a Dolt server (%s), but that server is unreachable.
 
 metadata.json (committed) says dolt_mode=server, so this is not a fresh clone.
 Refusing to re-initialize — doing so would silently flip the backend to embedded.
 
 Check the server and your environment:
-  - Is the Dolt sql-server running and reachable at %s:%d?
+  - Is the Dolt sql-server running and reachable at %s?
   - Are the BEADS_DOLT_* variables exported in this shell (direnv)?
   - bd dolt status     # inspect Dolt server state
 
 If you genuinely intend to migrate this workspace to an embedded database:
   bd init --migrate-backend
 
-Aborting.`, ui.RenderWarn("⚠"), host, port, host, port)
+Aborting.`, ui.RenderWarn("⚠"), addr, addr)
 				} else {
 					// Server unreachable or error during check AND metadata.json is
 					// not committed: a genuine fresh clone / bootstrap in progress.
