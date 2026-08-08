@@ -138,3 +138,6 @@ bd_test
 
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
+
+# Quarry session-transcript captures (pkit-kcps)
+.punt-labs/quarry/captures/
