@@ -65,6 +65,8 @@ result
 # direnv (machine-specific environment)
 .direnv
 .envrc
+.envrc.local
+.tmp/
 
 # GoReleaser build artifacts
 dist/
