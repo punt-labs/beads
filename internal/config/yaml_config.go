@@ -67,6 +67,10 @@ var YamlOnlyKeys = map[string]bool{
 	"dolt.shared-server": true, // Shared Dolt server at ~/.beads/shared-server/ (GH#2377)
 	"dolt.max-conns":     true, // Connection pool size override (default 10, GH#3140)
 
+	// Linear pull scope: per repo, so repos sharing a database and a Linear
+	// team each pull only issues carrying their own label.
+	"linear.pull_label": true,
+
 	// Secrets: tokens and API keys must NOT be stored in the Dolt database
 	// because that data is pushed to remotes, triggering secret-scanning
 	// blocks on GitHub. Store them in local config.yaml instead.

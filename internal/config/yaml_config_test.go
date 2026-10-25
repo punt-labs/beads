@@ -31,6 +31,7 @@ func TestIsYamlOnlyKey(t *testing.T) {
 
 		// Hierarchy settings (GH#995)
 		{"hierarchy.max-depth", true},
+		{"linear.pull_label", true},
 		{"hierarchy.custom_setting", true}, // prefix match
 
 		// Backup settings (GH#2358)

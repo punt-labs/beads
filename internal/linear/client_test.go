@@ -780,3 +780,46 @@ func TestExecute_RetryAfterCapApplied(t *testing.T) {
 
 // Note: BuildStateCache and FindStateForBeadsStatus require API calls
 // and would need mocking to test. Skipping unit tests for those.
+
+func TestFetchIssuesPullLabelFilter(t *testing.T) {
+	for _, label := range []string{"", "repo:ethos"} {
+		var filters []map[string]interface{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			var req GraphQLRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatalf("failed to unmarshal request: %v", err)
+			}
+			filter, _ := req.Variables["filter"].(map[string]interface{})
+			filters = append(filters, filter)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}`))
+		}))
+
+		client := NewClient("test-key", "test-team").WithPullLabel(label).WithEndpoint(server.URL)
+		if _, err := client.FetchIssues(context.Background(), "all"); err != nil {
+			t.Fatalf("FetchIssues: %v", err)
+		}
+		if _, err := client.FetchIssuesSince(context.Background(), "all", time.Now()); err != nil {
+			t.Fatalf("FetchIssuesSince: %v", err)
+		}
+		server.Close()
+
+		if len(filters) != 2 {
+			t.Fatalf("label %q: got %d requests, want 2", label, len(filters))
+		}
+		for _, f := range filters {
+			labels, ok := f["labels"].(map[string]interface{})
+			if label == "" {
+				if ok {
+					t.Errorf("no pull label: unexpected labels filter %v", labels)
+				}
+				continue
+			}
+			got, _ := json.Marshal(labels)
+			if want := `{"some":{"name":{"eq":"repo:ethos"}}}`; string(got) != want {
+				t.Errorf("labels filter = %s, want %s", got, want)
+			}
+		}
+	}
+}

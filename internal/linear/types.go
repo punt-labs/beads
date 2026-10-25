@@ -58,6 +58,7 @@ type Client struct {
 	APIKey         string
 	TeamID         string
 	ProjectID      string // Optional: filter issues to a specific project
+	PullLabel      string // Optional: fetch only issues carrying this label
 	Endpoint       string // GraphQL endpoint URL (defaults to DefaultAPIEndpoint)
 	HTTPClient     *http.Client
 	AuthMode       AuthMode
