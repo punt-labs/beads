@@ -1147,6 +1147,56 @@ func TestEngineConflictResolution(t *testing.T) {
 	}
 }
 
+type scopedCursorTracker struct {
+	*mockTracker
+}
+
+func (s *scopedCursorTracker) LastSyncKey() string { return "test.last_sync.scope" }
+
+func TestEngineDetectConflictsFallsBackToTrackerCursor(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	defer store.Close()
+
+	lastSync := time.Now().UTC().Add(-1 * time.Hour)
+	if err := store.SetLocalMetadata(ctx, "test.last_sync", lastSync.Format(time.RFC3339)); err != nil {
+		t.Fatalf("SetLocalMetadata() error: %v", err)
+	}
+
+	issue := &types.Issue{
+		ID:          "bd-scoped1",
+		Title:       "Local version",
+		Status:      types.StatusOpen,
+		IssueType:   types.TypeTask,
+		Priority:    2,
+		ExternalRef: strPtr("https://test.test/EXT-1"),
+		UpdatedAt:   time.Now().UTC().Add(-30 * time.Minute),
+	}
+	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
+		t.Fatalf("CreateIssue() error: %v", err)
+	}
+
+	tracker := &scopedCursorTracker{newMockTracker("test")}
+	tracker.issues = []TrackerIssue{{
+		ID:         "EXT-1",
+		Identifier: "EXT-1",
+		Title:      "External version",
+		UpdatedAt:  time.Now().UTC().Add(-15 * time.Minute),
+	}}
+
+	engine := NewEngine(tracker, store, "test-actor")
+	if got := engine.lastSyncKey(); got != "test.last_sync.scope" {
+		t.Fatalf("lastSyncKey() = %q, want test.last_sync.scope", got)
+	}
+	conflicts, err := engine.DetectConflicts(ctx)
+	if err != nil {
+		t.Fatalf("DetectConflicts() error: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("detected %d conflicts, want 1 (scoped cursor unset should fall back to test.last_sync)", len(conflicts))
+	}
+}
+
 func TestEngineSyncDoesNotCreateFalseConflictsAfterPull(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

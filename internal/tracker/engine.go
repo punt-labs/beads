@@ -229,9 +229,13 @@ func (e *Engine) DetectConflicts(ctx context.Context) ([]Conflict, error) {
 	)
 	defer span.End()
 
-	// Get last sync time
-	key := e.lastSyncKey()
-	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, key)
+	// Get last sync time. A newly scoped cursor (e.g. a pull label just set)
+	// falls back to the tracker-wide one, so the first scoped pull still
+	// protects local edits made since the last unscoped sync.
+	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey())
+	if err == nil && lastSyncStr == "" {
+		lastSyncStr, err = e.Store.GetLocalMetadata(ctx, e.Tracker.ConfigPrefix()+".last_sync")
+	}
 	if err != nil || lastSyncStr == "" {
 		return nil, nil // No previous sync, no conflicts possible
 	}
