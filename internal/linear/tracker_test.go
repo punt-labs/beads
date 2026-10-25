@@ -1006,3 +1006,12 @@ func TestCreateIssueNoDoubleFormatDescription(t *testing.T) {
 			capturedDescription, formattedDesc)
 	}
 }
+
+func TestTrackerLastSyncKey(t *testing.T) {
+	if got := (&Tracker{}).LastSyncKey(); got != "linear.last_sync" {
+		t.Errorf("LastSyncKey() = %q, want linear.last_sync", got)
+	}
+	if got := (&Tracker{pullLabel: "repo:ethos"}).LastSyncKey(); got != "linear.last_sync.repo:ethos" {
+		t.Errorf("LastSyncKey() = %q, want linear.last_sync.repo:ethos", got)
+	}
+}

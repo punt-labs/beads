@@ -210,7 +210,7 @@ func (e *Engine) Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error
 	// Update last_sync timestamp
 	if !opts.DryRun {
 		lastSync := time.Now().UTC().Format(time.RFC3339Nano)
-		key := e.Tracker.ConfigPrefix() + ".last_sync"
+		key := e.lastSyncKey()
 		if err := e.Store.SetLocalMetadata(ctx, key, lastSync); err != nil {
 			e.warn("Failed to update last_sync: %v", err)
 		}
@@ -230,8 +230,7 @@ func (e *Engine) DetectConflicts(ctx context.Context) ([]Conflict, error) {
 	defer span.End()
 
 	// Get last sync time
-	key := e.Tracker.ConfigPrefix() + ".last_sync"
-	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, key)
+	lastSyncStr, err := e.localEditCursor(ctx)
 	if err != nil || lastSyncStr == "" {
 		return nil, nil // No previous sync, no conflicts possible
 	}
@@ -302,13 +301,18 @@ func (e *Engine) doPull(ctx context.Context, opts SyncOptions, allowOverwriteIDs
 	// Determine if incremental sync is possible
 	fetchOpts := FetchOptions{State: opts.State}
 	var lastSync *time.Time
-	key := e.Tracker.ConfigPrefix() + ".last_sync"
-	if lastSyncStr, err := e.Store.GetLocalMetadata(ctx, key); err == nil && lastSyncStr != "" {
+	if lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey()); err == nil && lastSyncStr != "" {
 		if t, err := parseSyncTime(lastSyncStr); err == nil {
 			fetchOpts.Since = &t
-			lastSync = &t
 			stats.Incremental = true
 			stats.SyncedSince = lastSyncStr
+		}
+	}
+	// Local edits are protected from the edit cursor, which may be older than
+	// the fetch cursor when a scoped cursor (e.g. a new pull label) is unset.
+	if lastSyncStr, err := e.localEditCursor(ctx); err == nil && lastSyncStr != "" {
+		if t, err := parseSyncTime(lastSyncStr); err == nil {
+			lastSync = &t
 		}
 	}
 
@@ -1428,4 +1432,31 @@ func (e *Engine) warn(format string, args ...interface{}) {
 	if e.OnWarning != nil {
 		e.OnWarning(msg)
 	}
+}
+
+// LastSyncKeyer is implemented by trackers whose last_sync cursor must be
+// scoped more narrowly than the tracker (e.g. per pull label), so repos that
+// share a database don't advance each other's incremental-pull cursor.
+type LastSyncKeyer interface {
+	LastSyncKey() string
+}
+
+func (e *Engine) lastSyncKey() string {
+	if k, ok := e.Tracker.(LastSyncKeyer); ok {
+		if key := k.LastSyncKey(); key != "" {
+			return key
+		}
+	}
+	return e.Tracker.ConfigPrefix() + ".last_sync"
+}
+
+// localEditCursor returns the last sync time used to decide whether a local
+// edit is unsynced. An unset scoped cursor falls back to the tracker-wide one,
+// so the first scoped pull still protects edits made since the last sync.
+func (e *Engine) localEditCursor(ctx context.Context) (string, error) {
+	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey())
+	if err == nil && lastSyncStr == "" {
+		lastSyncStr, err = e.Store.GetLocalMetadata(ctx, e.Tracker.ConfigPrefix()+".last_sync")
+	}
+	return lastSyncStr, err
 }

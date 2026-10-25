@@ -146,6 +146,7 @@ func (c *Client) WithEndpoint(endpoint string) *Client {
 		APIKey:         c.APIKey,
 		TeamID:         c.TeamID,
 		ProjectID:      c.ProjectID,
+		PullLabel:      c.PullLabel,
 		Endpoint:       endpoint,
 		HTTPClient:     c.HTTPClient,
 		AuthMode:       c.AuthMode,
@@ -161,6 +162,7 @@ func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
 		APIKey:         c.APIKey,
 		TeamID:         c.TeamID,
 		ProjectID:      c.ProjectID,
+		PullLabel:      c.PullLabel,
 		Endpoint:       c.Endpoint,
 		HTTPClient:     httpClient,
 		AuthMode:       c.AuthMode,
@@ -176,11 +178,41 @@ func (c *Client) WithProjectID(projectID string) *Client {
 		APIKey:         c.APIKey,
 		TeamID:         c.TeamID,
 		ProjectID:      projectID,
+		PullLabel:      c.PullLabel,
 		Endpoint:       c.Endpoint,
 		HTTPClient:     c.HTTPClient,
 		AuthMode:       c.AuthMode,
 		TokenManager:   c.TokenManager,
 		RateLimitFloor: c.RateLimitFloor,
+	}
+}
+
+// WithPullLabel returns a new client configured to fetch only issues carrying
+// the named label. Several repos can share one Linear team this way, each
+// pulling only its own issues.
+func (c *Client) WithPullLabel(label string) *Client {
+	cp := *c
+	cp.PullLabel = label
+	return &cp
+}
+
+// addScopeFilters narrows an issue filter to the configured project and label.
+func (c *Client) addScopeFilters(filter map[string]interface{}) {
+	if c.ProjectID != "" {
+		filter["project"] = map[string]interface{}{
+			"id": map[string]interface{}{
+				"eq": c.ProjectID,
+			},
+		}
+	}
+	if c.PullLabel != "" {
+		filter["labels"] = map[string]interface{}{
+			"some": map[string]interface{}{
+				"name": map[string]interface{}{
+					"eq": c.PullLabel,
+				},
+			},
+		}
 	}
 }
 
@@ -205,6 +237,7 @@ func (c *Client) WithRateLimitFloor(floor int) *Client {
 		APIKey:         c.APIKey,
 		TeamID:         c.TeamID,
 		ProjectID:      c.ProjectID,
+		PullLabel:      c.PullLabel,
 		Endpoint:       c.Endpoint,
 		HTTPClient:     c.HTTPClient,
 		AuthMode:       c.AuthMode,
@@ -383,7 +416,7 @@ func (c *Client) executeOnce(ctx context.Context, req *GraphQLRequest) (json.Raw
 
 // FetchIssues retrieves issues from Linear with optional filtering by state.
 // state can be: "open" (unstarted/started), "closed" (completed/canceled), or "all".
-// If ProjectID is set on the client, only issues from that project are returned.
+// If ProjectID or PullLabel is set on the client, only matching issues are returned.
 func (c *Client) FetchIssues(ctx context.Context, state string) ([]Issue, error) {
 	var allIssues []Issue
 	var cursor string
@@ -396,14 +429,7 @@ func (c *Client) FetchIssues(ctx context.Context, state string) ([]Issue, error)
 		},
 	}
 
-	// Add project filter if configured
-	if c.ProjectID != "" {
-		filter["project"] = map[string]interface{}{
-			"id": map[string]interface{}{
-				"eq": c.ProjectID,
-			},
-		}
-	}
+	c.addScopeFilters(filter)
 
 	switch state {
 	case "open":
@@ -470,7 +496,7 @@ func (c *Client) FetchIssues(ctx context.Context, state string) ([]Issue, error)
 // FetchIssuesSince retrieves issues from Linear that have been updated since the given time.
 // This enables incremental sync by only fetching issues modified after the last sync.
 // The state parameter can be: "open", "closed", or "all".
-// If ProjectID is set on the client, only issues from that project are returned.
+// If ProjectID or PullLabel is set on the client, only matching issues are returned.
 func (c *Client) FetchIssuesSince(ctx context.Context, state string, since time.Time) ([]Issue, error) {
 	var allIssues []Issue
 	var cursor string
@@ -489,14 +515,7 @@ func (c *Client) FetchIssuesSince(ctx context.Context, state string, since time.
 		},
 	}
 
-	// Add project filter if configured
-	if c.ProjectID != "" {
-		filter["project"] = map[string]interface{}{
-			"id": map[string]interface{}{
-				"eq": c.ProjectID,
-			},
-		}
-	}
+	c.addScopeFilters(filter)
 
 	// Add state filter if specified
 	switch state {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`linear.pull_label`** - scopes Linear pulls to issues carrying one label (e.g. `repo:ethos`). It lives in `config.yaml` (or `LINEAR_PULL_LABEL`), so repos that share a Dolt database and one Linear team each pull only their own issues instead of every unlinked issue in the team. The incremental-pull cursor is kept per label (`linear.last_sync.<label>`), so one repo's pull no longer hides older issues from another's. An issue that loses the label drops out of that repo's pulls.
+
 ### Fixed
 
 - **`bd dolt status` reports externally-managed local servers truthfully** - when a rig is configured as `dolt_mode: server` pointing at a local host but `dolt.auto-start: false` (so an orchestrator or systemd owns the sql-server lifecycle), `bd dolt status` previously said `not running` because no PID file existed. It now SQL-probes the configured endpoint, matching the path already used for non-local hosts, and reports `running (external)` with host/port/database/version when the server answers. **JSON output shape change**: on affected rigs, `bd dolt status --json` now emits `{"running": true, "mode": "external", ...}` instead of `{"running": false, "pid": 0, ...}`. Automation that parsed the old `running:false` as a "needs restart" sentinel should switch to checking `running` directly. (be-0eyj, [#3550](https://github.com/gastownhall/beads/pull/3550))

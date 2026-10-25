@@ -17,11 +17,13 @@ Configuration:
   bd config set linear.team_id "TEAM_ID"
   bd config set linear.team_ids "TEAM_ID1,TEAM_ID2"  # Multiple teams (comma-separated)
   bd config set linear.project_id "PROJECT_ID"  # Optional: sync only this project
+  bd config set linear.pull_label "repo:NAME"   # Optional: pull only issues with this label (config.yaml)
 
 Environment variables (alternative to config):
   LINEAR_API_KEY  - Linear API key (for individual developers)
   LINEAR_TEAM_ID  - Linear team ID (UUID, singular)
   LINEAR_TEAM_IDS - Linear team IDs (comma-separated UUIDs)
+  LINEAR_PULL_LABEL - Pull only issues carrying this label
 
 OAuth (for CI workers / automated sync):
   LINEAR_OAUTH_CLIENT_ID     - OAuth app client ID
