@@ -1197,6 +1197,62 @@ func TestEngineDetectConflictsFallsBackToTrackerCursor(t *testing.T) {
 	}
 }
 
+func TestEnginePullKeepsLocalEditsWhenScopedCursorUnset(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	defer store.Close()
+
+	lastSync := time.Now().UTC().Add(-1 * time.Hour)
+	if err := store.SetLocalMetadata(ctx, "test.last_sync", lastSync.Format(time.RFC3339)); err != nil {
+		t.Fatalf("SetLocalMetadata() error: %v", err)
+	}
+
+	extRef := "https://test.test/EXT-1"
+	issue := &types.Issue{
+		ID:          "bd-scoped2",
+		Title:       "Local title",
+		Status:      types.StatusOpen,
+		IssueType:   types.TypeTask,
+		Priority:    2,
+		ExternalRef: &extRef,
+	}
+	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
+		t.Fatalf("CreateIssue() error: %v", err)
+	}
+
+	tracker := &scopedCursorTracker{newMockTracker("test")}
+	tracker.fieldMapper = &mockMapper{
+		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
+			return &IssueConversion{Issue: &types.Issue{
+				ID:        "bd-scoped2",
+				Title:     ti.Title,
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			}}
+		},
+	}
+	tracker.issues = []TrackerIssue{{
+		ID:         "EXT-1",
+		Identifier: "EXT-1",
+		URL:        extRef,
+		Title:      "Remote title",
+		UpdatedAt:  time.Now().UTC().Add(time.Second),
+	}}
+
+	engine := NewEngine(tracker, store, "test-actor")
+	if _, err := engine.Sync(ctx, SyncOptions{Pull: true}); err != nil {
+		t.Fatalf("Sync() error: %v", err)
+	}
+	got, err := store.GetIssue(ctx, "bd-scoped2")
+	if err != nil {
+		t.Fatalf("GetIssue() error: %v", err)
+	}
+	if got.Title != "Local title" {
+		t.Fatalf("title = %q, want unsynced local edit kept", got.Title)
+	}
+}
+
 func TestEngineSyncDoesNotCreateFalseConflictsAfterPull(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
