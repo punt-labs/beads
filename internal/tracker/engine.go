@@ -229,13 +229,8 @@ func (e *Engine) DetectConflicts(ctx context.Context) ([]Conflict, error) {
 	)
 	defer span.End()
 
-	// Get last sync time. A newly scoped cursor (e.g. a pull label just set)
-	// falls back to the tracker-wide one, so the first scoped pull still
-	// protects local edits made since the last unscoped sync.
-	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey())
-	if err == nil && lastSyncStr == "" {
-		lastSyncStr, err = e.Store.GetLocalMetadata(ctx, e.Tracker.ConfigPrefix()+".last_sync")
-	}
+	// Get last sync time
+	lastSyncStr, err := e.localEditCursor(ctx)
 	if err != nil || lastSyncStr == "" {
 		return nil, nil // No previous sync, no conflicts possible
 	}
@@ -306,13 +301,18 @@ func (e *Engine) doPull(ctx context.Context, opts SyncOptions, allowOverwriteIDs
 	// Determine if incremental sync is possible
 	fetchOpts := FetchOptions{State: opts.State}
 	var lastSync *time.Time
-	key := e.lastSyncKey()
-	if lastSyncStr, err := e.Store.GetLocalMetadata(ctx, key); err == nil && lastSyncStr != "" {
+	if lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey()); err == nil && lastSyncStr != "" {
 		if t, err := parseSyncTime(lastSyncStr); err == nil {
 			fetchOpts.Since = &t
-			lastSync = &t
 			stats.Incremental = true
 			stats.SyncedSince = lastSyncStr
+		}
+	}
+	// Local edits are protected from the edit cursor, which may be older than
+	// the fetch cursor when a scoped cursor (e.g. a new pull label) is unset.
+	if lastSyncStr, err := e.localEditCursor(ctx); err == nil && lastSyncStr != "" {
+		if t, err := parseSyncTime(lastSyncStr); err == nil {
+			lastSync = &t
 		}
 	}
 
@@ -1448,4 +1448,15 @@ func (e *Engine) lastSyncKey() string {
 		}
 	}
 	return e.Tracker.ConfigPrefix() + ".last_sync"
+}
+
+// localEditCursor returns the last sync time used to decide whether a local
+// edit is unsynced. An unset scoped cursor falls back to the tracker-wide one,
+// so the first scoped pull still protects edits made since the last sync.
+func (e *Engine) localEditCursor(ctx context.Context) (string, error) {
+	lastSyncStr, err := e.Store.GetLocalMetadata(ctx, e.lastSyncKey())
+	if err == nil && lastSyncStr == "" {
+		lastSyncStr, err = e.Store.GetLocalMetadata(ctx, e.Tracker.ConfigPrefix()+".last_sync")
+	}
+	return lastSyncStr, err
 }
