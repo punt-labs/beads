@@ -29,6 +29,7 @@ type Tracker struct {
 	store     storage.Storage
 	teamIDs   []string // ordered list of configured team IDs
 	projectID string
+	pullLabel string
 }
 
 // SetTeamIDs sets the team IDs before Init(). When set, Init() uses these
@@ -84,6 +85,7 @@ func (t *Tracker) Init(ctx context.Context, store storage.Storage) error {
 	// Dolt database (and a Linear team) can scope pulls to its own issues.
 	pullLabel, _ := t.getConfig(ctx, "linear.pull_label", "LINEAR_PULL_LABEL")
 	pullLabel = strings.TrimSpace(pullLabel)
+	t.pullLabel = pullLabel
 
 	// Read optional rate-limit floor (LINEAR_RATE_LIMIT_FLOOR env or linear.rate_limit_floor config).
 	var rateLimitFloor int
@@ -122,6 +124,15 @@ func (t *Tracker) Init(ctx context.Context, store storage.Storage) error {
 
 	t.config = LoadMappingConfig(&configLoaderAdapter{ctx: ctx, store: store})
 	return nil
+}
+
+// LastSyncKey scopes the incremental-pull cursor to the pull label, so a pull
+// for one label doesn't hide older issues from a pull for another label.
+func (t *Tracker) LastSyncKey() string {
+	if t.pullLabel == "" {
+		return "linear.last_sync"
+	}
+	return "linear.last_sync." + t.pullLabel
 }
 
 func (t *Tracker) Validate() error {

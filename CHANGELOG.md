@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`linear.pull_label`** - scopes Linear pulls to issues carrying one label (e.g. `repo:ethos`). It lives in `config.yaml` (or `LINEAR_PULL_LABEL`), so repos that share a Dolt database and one Linear team each pull only their own issues instead of every unlinked issue in the team.
+- **`linear.pull_label`** - scopes Linear pulls to issues carrying one label (e.g. `repo:ethos`). It lives in `config.yaml` (or `LINEAR_PULL_LABEL`), so repos that share a Dolt database and one Linear team each pull only their own issues instead of every unlinked issue in the team. The incremental-pull cursor is kept per label (`linear.last_sync.<label>`), so one repo's pull no longer hides older issues from another's. An issue that loses the label drops out of that repo's pulls.
 
 ### Fixed
 
