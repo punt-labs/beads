@@ -1802,6 +1802,8 @@ func TestPrelinkedScopeForPrefix(t *testing.T) {
 		{"qmb", &types.Issue{ID: "ethos-abc"}, false},
 		{"qmb", &types.Issue{ID: "qmbx-abc"}, false},
 		{"qmb", &types.Issue{ID: "qmb-ui-a3f9"}, false},
+		{"qmb", &types.Issue{ID: "qmb-ui-abcdef"}, false},
+		{"qmb", &types.Issue{ID: "qmb-"}, false},
 		{"punt", &types.Issue{ID: "punt-labs-s93"}, false},
 		{"punt-labs", &types.Issue{ID: "punt-labs-s93"}, true},
 		{"qmb", &types.Issue{ID: "qmb"}, false},
