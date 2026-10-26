@@ -1789,3 +1789,22 @@ func TestIsValidUUID(t *testing.T) {
 		})
 	}
 }
+
+func TestPrelinkedScopeForPrefix(t *testing.T) {
+	scope := prelinkedScopeForPrefix("qmb")
+	cases := []struct {
+		issue *types.Issue
+		want  bool
+	}{
+		{&types.Issue{ID: "qmb-7reeea"}, true},
+		{&types.Issue{ID: "ethos-abc"}, false},
+		{&types.Issue{ID: "qmbx-abc"}, false},
+		{&types.Issue{ID: "qmb"}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		if got := scope(c.issue); got != c.want {
+			t.Errorf("scope(%+v) = %v, want %v", c.issue, got, c.want)
+		}
+	}
+}

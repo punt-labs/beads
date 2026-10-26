@@ -135,6 +135,10 @@ func (t *Tracker) LastSyncKey() string {
 	return "linear.last_sync." + t.pullLabel
 }
 
+// PullLabel returns the configured linear.pull_label, or "" when pulls are
+// team-wide.
+func (t *Tracker) PullLabel() string { return t.pullLabel }
+
 func (t *Tracker) Validate() error {
 	if len(t.clients) == 0 {
 		return fmt.Errorf("Linear tracker not initialized")
