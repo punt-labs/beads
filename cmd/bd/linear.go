@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/tracker"
 	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/internal/utils"
 )
 
 // linearCmd is the root command for Linear integration.
@@ -459,10 +460,14 @@ func linearIssuePrefix(ctx context.Context, st storage.Storage) string {
 	return "bd"
 }
 
-// prelinkedScopeForPrefix accepts only beads whose ID carries prefix.
+// prelinkedScopeForPrefix accepts only beads whose ID carries prefix. A
+// longer prefix nested under it ("qmb-ui" under "qmb") belongs to another
+// repo, so the ID's own prefix must equal prefix, not just start with it.
 func prelinkedScopeForPrefix(prefix string) func(*types.Issue) bool {
+	prefix = strings.TrimSuffix(strings.TrimSpace(prefix), "-")
 	return func(issue *types.Issue) bool {
-		return issue != nil && strings.HasPrefix(issue.ID, prefix+"-")
+		return issue != nil && strings.HasPrefix(issue.ID, prefix+"-") &&
+			utils.ExtractIssuePrefix(issue.ID) == prefix
 	}
 }
 

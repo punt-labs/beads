@@ -1791,20 +1791,25 @@ func TestIsValidUUID(t *testing.T) {
 }
 
 func TestPrelinkedScopeForPrefix(t *testing.T) {
-	scope := prelinkedScopeForPrefix("qmb")
 	cases := []struct {
-		issue *types.Issue
-		want  bool
+		prefix string
+		issue  *types.Issue
+		want   bool
 	}{
-		{&types.Issue{ID: "qmb-7reeea"}, true},
-		{&types.Issue{ID: "ethos-abc"}, false},
-		{&types.Issue{ID: "qmbx-abc"}, false},
-		{&types.Issue{ID: "qmb"}, false},
-		{nil, false},
+		{"qmb", &types.Issue{ID: "qmb-7reeea"}, true},
+		{"qmb", &types.Issue{ID: "qmb-7reeea.1"}, true},
+		{"qmb-", &types.Issue{ID: "qmb-7reeea"}, true},
+		{"qmb", &types.Issue{ID: "ethos-abc"}, false},
+		{"qmb", &types.Issue{ID: "qmbx-abc"}, false},
+		{"qmb", &types.Issue{ID: "qmb-ui-a3f9"}, false},
+		{"punt", &types.Issue{ID: "punt-labs-s93"}, false},
+		{"punt-labs", &types.Issue{ID: "punt-labs-s93"}, true},
+		{"qmb", &types.Issue{ID: "qmb"}, false},
+		{"qmb", nil, false},
 	}
 	for _, c := range cases {
-		if got := scope(c.issue); got != c.want {
-			t.Errorf("scope(%+v) = %v, want %v", c.issue, got, c.want)
+		if got := prelinkedScopeForPrefix(c.prefix)(c.issue); got != c.want {
+			t.Errorf("prelinkedScopeForPrefix(%q)(%+v) = %v, want %v", c.prefix, c.issue, got, c.want)
 		}
 	}
 }
