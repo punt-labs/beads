@@ -33,6 +33,10 @@ scripts/pr-preflight.sh --search "<topic keywords>" --repo gastownhall/beads
 scripts/pr-preflight.sh <pr-number> --repo gastownhall/beads
 ```
 
+PR review follows punt-kit/standards/pr-review.md: local review (qodo review +
+silent-failure-hunter + code-reviewer) before the PR, then Qodo and Bugbot once
+at open, at most two rounds, Copilot only on request.
+
 External contributor PRs have priority. Review and build on their branch when
 possible, preserve their tests and attribution, and never close or supersede
 their PR silently. If a rewrite is unavoidable, explain why on the original PR
