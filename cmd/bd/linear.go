@@ -325,6 +325,12 @@ func runLinearSync(cmd *cobra.Command, args []string) {
 	engine.OnMessage = func(msg string) { fmt.Println("  " + msg) }
 	engine.OnWarning = func(msg string) { fmt.Fprintf(os.Stderr, "Warning: %s\n", msg) }
 
+	// A pull label means repos share this database; keep pre-linked
+	// hydration to this repo's own beads.
+	if lt.PullLabel() != "" {
+		engine.PrelinkedScope = prelinkedScopeForPrefix(linearIssuePrefix(ctx, store))
+	}
+
 	// Set up Linear-specific pull hooks
 	engine.PullHooks = buildLinearPullHooks(ctx, linearPullHookOptions{
 		Milestones: milestones,
@@ -438,6 +444,37 @@ type linearPullHookOptions struct {
 	Actor      string
 }
 
+// linearIssuePrefix returns the prefix for beads created by a Linear pull.
+// YAML config takes precedence — in shared-server mode the DB may belong to a
+// different project (GH#2469).
+func linearIssuePrefix(ctx context.Context, st storage.Storage) string {
+	if prefix := config.GetString("issue-prefix"); prefix != "" {
+		return prefix
+	}
+	if st != nil {
+		if prefix, err := st.GetConfig(ctx, "issue_prefix"); err == nil && prefix != "" {
+			return prefix
+		}
+	}
+	return "bd"
+}
+
+// prelinkedScopeForPrefix accepts only beads whose ID is prefix-<hash>.
+// Generated hashes never contain a hyphen, so a hyphen after prefix means a
+// longer prefix nested under it ("qmb-ui" under "qmb") from another repo.
+// Hyphenated custom IDs are skipped too; the label-filtered fetch still
+// covers them.
+func prelinkedScopeForPrefix(prefix string) func(*types.Issue) bool {
+	prefix = strings.TrimSuffix(strings.TrimSpace(prefix), "-")
+	return func(issue *types.Issue) bool {
+		if issue == nil {
+			return false
+		}
+		rest, ok := strings.CutPrefix(issue.ID, prefix+"-")
+		return ok && rest != "" && !strings.Contains(rest, "-")
+	}
+}
+
 // buildLinearPullHooks creates PullHooks for Linear-specific pull behavior.
 func buildLinearPullHooks(ctx context.Context, opts linearPullHookOptions) *tracker.PullHooks {
 	return buildLinearPullHooksForStore(ctx, store, opts)
@@ -466,16 +503,7 @@ func buildLinearPullHooksForStore(ctx context.Context, st storage.Storage, opts 
 			}
 		}
 
-		// YAML config takes precedence — in shared-server mode the DB
-		// may belong to a different project (GH#2469).
-		prefix := config.GetString("issue-prefix")
-		if prefix == "" {
-			var err error
-			prefix, err = st.GetConfig(ctx, "issue_prefix")
-			if err != nil || prefix == "" {
-				prefix = "bd"
-			}
-		}
+		prefix := linearIssuePrefix(ctx, st)
 
 		generateID = func(_ context.Context, issue *types.Issue) error {
 			ids := []*types.Issue{issue}

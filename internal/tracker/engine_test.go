@@ -2857,6 +2857,88 @@ func TestEnginePullHydratesNewPrelinkedExternalRefAfterLastSync(t *testing.T) {
 	}
 }
 
+func TestEnginePullPrelinkedScopeSkipsOutOfScopeIssues(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	defer store.Close()
+
+	lastSync := time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.SetLocalMetadata(ctx, "linear.last_sync", lastSync.Format(time.RFC3339)); err != nil {
+		t.Fatalf("SetLocalMetadata error: %v", err)
+	}
+	newLocal := func(id, identifier string) *types.Issue {
+		issue := &types.Issue{
+			ID:          id,
+			Title:       "Local stub",
+			Description: "stub",
+			Status:      types.StatusOpen,
+			IssueType:   types.TypeTask,
+			Priority:    2,
+			ExternalRef: strPtr("https://linear.app/team/issue/" + identifier + "/stub"),
+			CreatedAt:   lastSync.Add(30 * time.Minute),
+			UpdatedAt:   lastSync.Add(30 * time.Minute),
+		}
+		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
+			t.Fatalf("CreateIssue %s error: %v", id, err)
+		}
+		return issue
+	}
+	mine := newLocal("mine-1", "TEAM-1")
+	theirs := newLocal("theirs-1", "TEAM-2")
+
+	base := newMockTracker("linear")
+	base.issues = []TrackerIssue{
+		{ID: "linear-1", Identifier: "TEAM-1", Title: "Remote mine", Description: "remote", UpdatedAt: lastSync.Add(-30 * time.Minute)},
+		{ID: "linear-2", Identifier: "TEAM-2", Title: "Remote theirs", Description: "remote", UpdatedAt: lastSync.Add(-30 * time.Minute)},
+	}
+	base.fetchIssues = func(_ context.Context, opts FetchOptions) ([]TrackerIssue, error) {
+		if opts.Since == nil {
+			return base.issues, nil
+		}
+		return nil, nil
+	}
+	lt := &mockExternalRefTracker{
+		mockTracker: base,
+		buildRef: func(issue *TrackerIssue) string {
+			return "https://linear.app/team/issue/" + issue.Identifier
+		},
+		extract: func(ref string) string {
+			parts := strings.Split(ref, "/issue/")
+			if len(parts) != 2 {
+				return ""
+			}
+			return strings.Split(parts[1], "/")[0]
+		},
+		isRef: func(ref string) bool {
+			return strings.Contains(ref, "linear.app/") && strings.Contains(ref, "/issue/")
+		},
+	}
+
+	engine := NewEngine(lt, store, "test-actor")
+	engine.PrelinkedScope = func(issue *types.Issue) bool { return strings.HasPrefix(issue.ID, "mine-") }
+	result, err := engine.Sync(ctx, SyncOptions{Pull: true})
+	if err != nil {
+		t.Fatalf("Sync error: %v", err)
+	}
+	if result.PullStats.Updated != 1 {
+		t.Fatalf("PullStats = %+v, want one hydrated update", result.PullStats)
+	}
+	got, err := store.GetIssue(ctx, mine.ID)
+	if err != nil {
+		t.Fatalf("GetIssue %s error: %v", mine.ID, err)
+	}
+	if got.Title != "Remote mine" {
+		t.Fatalf("in-scope title = %q, want remote content", got.Title)
+	}
+	got, err = store.GetIssue(ctx, theirs.ID)
+	if err != nil {
+		t.Fatalf("GetIssue %s error: %v", theirs.ID, err)
+	}
+	if got.Title != "Local stub" {
+		t.Fatalf("out-of-scope title = %q, want it left alone", got.Title)
+	}
+}
+
 func TestEnginePullHydratesOlderIssueWhenExternalRefAddedAfterLastSync(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

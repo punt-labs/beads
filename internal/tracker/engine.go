@@ -104,6 +104,11 @@ type Engine struct {
 	OnMessage func(msg string)
 	OnWarning func(msg string)
 
+	// PrelinkedScope, when set, limits pre-linked hydration on a bulk pull to
+	// the local issues it accepts. Repos sharing one database use it so one
+	// repo's pull doesn't refresh another repo's linked issues.
+	PrelinkedScope func(*types.Issue) bool
+
 	// stateCache holds the opaque value from PushHooks.BuildStateCache during a push.
 	// Tracker adapters access it via ResolveState().
 	stateCache interface{}
@@ -643,6 +648,9 @@ func (e *Engine) fetchPrelinkedIssues(ctx context.Context, fetched []TrackerIssu
 	var hydrated []TrackerIssue
 	for _, local := range localIssues {
 		if local == nil || local.ExternalRef == nil {
+			continue
+		}
+		if e.PrelinkedScope != nil && !e.PrelinkedScope(local) {
 			continue
 		}
 		ref := strings.TrimSpace(*local.ExternalRef)
