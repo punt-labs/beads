@@ -140,3 +140,10 @@ bd_test
 
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
+
+# ethos: machine-local files (.local.*) - may hold secrets, never track
+.punt-labs/**/*.local.*
+.punt-labs/**/local/**
+.punt-labs/ethos/missions/**/*.lock
+.punt-labs/ethos/missions.jsonl.lock
+.punt-labs/**/*.ethos-tmp*
