@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `.gitignore` now ignores `.punt-labs/**/*.local.*` so ethos machine-local
-  extension files are never tracked.
+- `.gitignore` now ignores the ethos runtime zones (`.punt-labs/**/local/**`,
+  `.punt-labs/**/*.local.*`, mission and `missions.jsonl` lock files, and
+  `.punt-labs/**/*.ethos-tmp*`) so ethos machine-local files are never tracked.
 
 ### Fixed
 
