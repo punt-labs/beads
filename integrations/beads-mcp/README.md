@@ -9,7 +9,7 @@ Enables AI agents to manage tasks using bd CLI through Model Context Protocol.
 
 ## Installing
 
-Install from PyPI:
+Requires Python 3.11 or later. Install from PyPI:
 
 ```bash
 # Using uv (recommended)

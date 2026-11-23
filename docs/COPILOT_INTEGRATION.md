@@ -13,7 +13,7 @@ Beads provides a persistent, structured memory for coding agents through the MCP
 - VS Code 1.96+ with GitHub Copilot extension
 - GitHub Copilot subscription (Individual, Business, or Enterprise)
 - beads CLI installed (`brew install beads` or `npm install -g @beads/bd`)
-- Python 3.10+ OR uv package manager
+- Python 3.11+ OR uv package manager
 
 ## Quick Setup
 
