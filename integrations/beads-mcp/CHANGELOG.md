@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Require Python 3.11 or later (was 3.10), matching upstream. dnspython
+  2.9.x needs Python 3.11, and the 3.10 resolution held dnspython at 2.8.0.
+
+### Security
+- dnspython 2.8.0 → 2.9.2 in `uv.lock` (GHSA-vvf4-9x63-8xvv,
+  GHSA-45c3-73f7-pv4m).
+
 ### Fixed
 - `mcp__beads__show()` no longer crashes with `pydantic literal_error` when an
   issue has dependency types beyond the original four (`blocks`, `related`,
